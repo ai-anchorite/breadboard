@@ -1,0 +1,409 @@
+const path = require('path')
+const express = require('express')
+const cookie = require('cookie')
+const getport = require('getport')
+const http = require("http");
+const os = require('os')
+const fs = require('fs')
+const socketIO = require('socket.io')
+const yaml = require('js-yaml');
+const Watcher = require('watcher');
+const cookieParser = require('cookie-parser');
+const { v4: uuidv4 } = require('uuid');
+const Updater = require('./updater/index')
+const BasicAuth = require('./basicauth')
+const IPC = require('./ipc')
+const Diffusionbee = require('./crawler/diffusionbee')
+const Standard = require('./crawler/standard')
+const GM = require("gmgm")
+
+class BreadboardServer {
+  ipc = {}
+  
+  async init(config) {
+    this.config = config
+    this.version = config.version || "0.5.0"
+    
+    let settings = await this.settings()
+    if (settings.accounts && Object.keys(settings.accounts).length > 0) {
+      this.basicauth = new BasicAuth(settings.accounts)
+    }
+    
+    if (settings.port) {
+      this.port = parseInt(settings.port)
+    } else {
+      this.port = await new Promise((resolve, reject) => {
+        getport(function (e, p) {
+          if (e) throw e
+          resolve(p)
+        })
+      })
+    }
+    
+    console.log("Breadboard version:", this.version)
+    this.need_update = null
+    this.default_sync_mode = "default"
+    this.current_sorter_code = 0
+
+    const home = os.homedir()
+    this.home = path.resolve(home, "__breadboard__")
+
+    this.config.gm = {
+      user: new GM({
+        store: path.resolve(this.home, "gm", "user"),
+        schema: [{
+          path: "dc:subject",
+          keys: []
+        }]
+      }),
+      agent: new GM({
+        store: path.resolve(this.home, "gm", "agent"),
+        schema: [{
+          path: "xmp:gm",
+          keys: [
+            "xmp:prompt",
+            "xmp:sampler",
+            "xmp:steps",
+            "xmp:cfg_scale",
+            "xmp:input_strength",
+            "xmp:seed",
+            "xmp:negative_prompt",
+            "xmp:model_name",
+            "xmp:model_hash",
+            "xmp:model_url",
+            "xmp:agent",
+            "xmp:width",
+            "xmp:height",
+            "xmp:aesthetic_score",
+            "xmp:controlnet_module",
+            "xmp:controlnet_model",
+            "xmp:controlnet_weight",
+            "xmp:controlnet_guidance_strength"
+          ]
+        }]
+      })
+    }
+
+    this.engines = {}
+
+    await this.updateCheck().catch((e) => {
+      console.log("update check error", e)
+    })
+    
+    this.start()
+  }
+  
+  async parse(filename) {
+    const folder = path.dirname(filename)
+    let file_path = filename
+    let root_path = folder
+    let res;
+    
+    try {
+      if (/diffusionbee/g.test(root_path)) {
+        if (!this.engines.diffusionbee) {
+          this.engines.diffusionbee = new Diffusionbee(root_path, this.config.gm)
+        }
+        await this.engines.diffusionbee.init()
+        res = await this.engines.diffusionbee.sync(file_path)
+      } else {
+        if (!this.engines.standard) {
+          this.engines.standard = new Standard(root_path, this.config.gm)
+        }
+        await this.engines.standard.init()
+        res = await this.engines.standard.sync(file_path)
+      }
+      return res
+    } catch (e) {
+      console.log("ERROR", e)
+      return null
+    }
+  }
+  
+  watch(paths) {
+    if (this.watcher) {
+      this.watcher.close()
+    }
+    
+    if (paths.length > 0) {
+      this.watcher = new Watcher(paths, {
+        recursive: true,
+        ignoreInitial: true
+      })
+      
+      this.watcher.on("add", async (filename) => {
+        if (filename.endsWith(".png")) {
+          let res
+          let last_mtime
+
+          let attempts = 20;
+          while(true) {
+            let stat = await fs.promises.stat(filename)
+            if (stat.mtimeMs === last_mtime) {
+              break;
+            }
+            last_mtime = stat.mtimeMs
+            attempts--
+            if (attempts <= 0) {
+              console.log("couldn't wait for file")
+              return
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 300));
+
+          for(let i=0; i<5; i++) {
+            res = await this.parse(filename)
+            if (res) {
+              break;
+            } else {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+          
+          if (res) {
+            for(let session in this.ipc) {
+              let ipc = this.ipc[session]
+              await ipc.push(res)
+            }
+          }
+        }
+      })
+    }
+  }
+  
+  async settings() {
+    let str = await fs.promises.readFile(this.config.config, "utf8")
+    const attrs = yaml.load(str)
+    const home = os.homedir()
+    const folders = attrs.folders.map((c) => {
+      let homeResolved = c.replace(/^~(?=$|\/|\\)/, home)
+      let relativeResolved = path.resolve(home, homeResolved)
+      return relativeResolved
+    })
+    attrs.folders = folders
+    return attrs
+  }
+  
+  auth(req, res) {
+    let session
+    if (req.agent === "electron") {
+      session = req.get("user-agent")
+    } else {
+      session = req.cookies.session ? req.cookies.session : uuidv4()
+    }
+    
+    if (!this.ipc[session]) {
+      this.ipc[session] = new IPC(this, session, this.config)
+      if (this.config.onconnect) {
+        this.config.onconnect(session)
+      }
+    }
+    
+    res.cookie('session', session)
+    return session
+  }
+  
+  start() {
+    let app = express()
+    const server = http.createServer(app);
+    
+    this.io = socketIO(server, {
+      cookie: true
+    });
+    
+    this.io.on('connection', (socket) => {
+      try {
+        let parsed = cookie.parse(socket.handshake.headers.cookie)
+        console.log("connect", parsed)
+        let session = parsed.session
+        if (this.ipc[session]) {
+          this.ipc[session].socket = socket
+          socket.on('disconnect', () => {
+            console.log('disconnect', parsed)
+            delete this.ipc[session]
+          })
+        }
+      } catch (e) {
+        console.log("io connection error", e)
+      }
+    });
+    
+    app.use(express.static(path.resolve(__dirname, '../public')))
+    app.get('/file', (req, res) => {
+      res.sendFile(req.query.file)
+    })
+    app.use(cookieParser());
+    app.use((req, res, next) => {
+      let a = req.get("user-agent")
+      req.agent = (/breadboard/.test(a) ? "electron" : "web")
+      next()
+    })
+    
+    if (this.basicauth) {
+      app.use(this.basicauth.auth.bind(this.basicauth))
+    }
+    
+    app.use(express.json());
+    app.set('view engine', 'ejs');
+    app.set('views', path.resolve(__dirname, "../views"))
+    
+    app.get("/", async (req, res) => {
+      let sync_mode = (req.query.synchronize ? req.query.synchronize : this.default_sync_mode)
+      let sync_folder = (req.query.sync_folder ? req.query.sync_folder : "")
+      if (req.query && req.query.sorter_code) {
+        this.current_sorter_code = req.query.sorter_code
+      }
+      let session = this.auth(req, res)
+      res.render("index", {
+        agent: req.agent,
+        platform: process.platform,
+        query: req.query,
+        version: this.version,
+        machine_version: this.version,
+        sync_mode,
+        sync_folder,
+        need_update: this.need_update,
+        current_sorter_code: this.current_sorter_code,
+        theme: this.ipc[session].theme,
+        style: this.ipc[session].style,
+      })
+      if (this.default_sync_mode) this.default_sync_mode = false
+    })
+    
+    app.get("/settings", (req, res) => {
+      let authorized = (this.basicauth ? true : false)
+      let session = this.auth(req, res)
+      res.render("settings", {
+        authorized,
+        agent: req.agent,
+        config: this.config.config,
+        platform: process.platform,
+        version: this.version,
+        machine_version: this.version,
+        query: req.query,
+        theme: this.ipc[session].theme,
+        style: this.ipc[session].style,
+      })
+    })
+    
+    app.get("/help", (req, res) => {
+      let items = [{
+        name: "discord",
+        description: "ask questions and share feedback",
+        icon: "fa-brands fa-discord",
+        href: "https://discord.gg/XahBUrbVwz"
+      }, {
+        name: "twitter",
+        description: "stay updated on Twitter",
+        icon: "fa-brands fa-twitter",
+        href: "https://twitter.com/cocktailpeanut"
+      }, {
+        name: "github",
+        description: "feature requests and bug report",
+        icon: "fa-brands fa-github",
+        href: "https://github.com/cocktailpeanut/breadboard/issues"
+      }]
+      let session = this.auth(req, res)
+      res.render("help", {
+        agent: req.agent,
+        config: this.config.config,
+        theme: this.ipc[session].theme,
+        style: this.ipc[session].style,
+        items,
+        platform: process.platform,
+        machine_version: this.version,
+        version: this.version
+      })
+    })
+    
+    app.get("/connect", (req, res) => {
+      let session = this.auth(req, res)
+      res.render("connect", {
+        agent: req.agent,
+        config: this.config.config,
+        platform: process.platform,
+        version: this.version,
+        machine_version: this.version,
+        query: req.query,
+        theme: this.ipc[session].theme,
+        style: this.ipc[session].style,
+      })
+    })
+    
+    app.get("/favorites", (req, res) => {
+      let session = this.auth(req, res)
+      res.render("favorites", {
+        agent: req.agent,
+        platform: process.platform,
+        version: this.version,
+        machine_version: this.version,
+        theme: this.ipc[session].theme,
+        style: this.ipc[session].style,
+      })
+    })
+    
+    app.get('/card', (req, res) => {
+      let session = this.auth(req, res)
+      res.render("card", {
+        agent: req.agent,
+        theme: this.ipc[session].theme,
+        style: this.ipc[session].style,
+        version: this.version,
+        file_path: req.query.file
+      })
+    })
+    
+    app.get('/screen', (req, res) => {
+      let session = this.auth(req, res)
+      res.render("screen", {
+        agent: req.agent,
+        theme: this.ipc[session].theme,
+        style: this.ipc[session].style,
+        version: this.version,
+      })
+    })
+    
+    app.post("/ipc", async (req, res) => {
+      let name = req.body.name
+      let args = req.body.args
+      let session = this.auth(req, res)
+      let r = await this.ipc[session].call(session, name, ...args)
+      if (r) {
+        res.json(r)
+      } else {
+        res.json({})
+      }
+    })
+    
+    server.listen(this.port, () => {
+      console.log(`Breadboard running at http://localhost:${this.port}`)
+    })
+    
+    this.app = app
+  }
+  
+  async updateCheck() {
+    if (this.config.releases) {
+      const releaseFeed = this.config.releases.feed
+      const releaseURL = this.config.releases.url
+      const updater = new Updater()
+      let res = await updater.check(releaseFeed)
+      if (res.feed && res.feed.entry) {
+        let latest = (Array.isArray(res.feed.entry) ? res.feed.entry[0] : res.feed.entry)
+        if (latest.title === this.version) {
+          console.log("UP TO DATE", latest.title, this.version)
+        } else {
+          console.log("Need to update to", latest.id, latest.updated, latest.title)
+          this.need_update = {
+            $url: releaseURL,
+            latest
+          }
+        }
+      }
+    }
+  }
+}
+
+module.exports = BreadboardServer

@@ -1,7 +1,7 @@
 {
   "name": "breadboard",
-  "version": "0.4.5",
-  "description": "",
+  "version": "0.5.0",
+  "description": "AI-generated media viewer with metadata support",
   "email": "cocktailpeanuts@proton.me",
   "main": "main.js",
   "scripts": {
@@ -12,6 +12,7 @@
   },
   "build": {
     "appId": "net.candywrap.breadboard",
+    "productName": "Breadboard",
     "extraResources": [
       "./script/**"
     ],
@@ -53,8 +54,7 @@
         {
           "target": "nsis",
           "arch": [
-            "x64",
-            "ia32"
+            "x64"
           ]
         }
       ]
@@ -63,11 +63,36 @@
   "author": "https://twitter.com/cocktailpeanut",
   "license": "MIT",
   "dependencies": {
-    "breadmachine": "^0.1.5",
-    "electron-context-menu": "^3.6.1"
+    "@ipld/dag-pb": "^2.1.18",
+    "axios": "^1.15.0",
+    "basic-auth": "^2.0.1",
+    "braces": "^3.0.3",
+    "chokidar": "^3.5.3",
+    "cookie": "^0.7.2",
+    "cookie-parser": "^1.4.7",
+    "ejs": "^3.1.10",
+    "electron-context-menu": "^4.1.1",
+    "escape-html": "^1.0.3",
+    "express": "^4.22.1",
+    "express-sse": "^0.5.3",
+    "fast-xml-parser": "^4.5.5",
+    "fastq": "^1.14.0",
+    "fdir": "^5.3.0",
+    "getport": "^0.1.0",
+    "gmgm": "^0.0.9",
+    "js-yaml": "^4.1.1",
+    "minimatch": "^10.0.1",
+    "multiformats": "^9.9.0",
+    "picomatch": "^2.3.2",
+    "png-metadata": "^1.0.2",
+    "socket.io": "^4.8.1",
+    "tsscmp": "^1.0.6",
+    "uuid": "^9.0.0",
+    "watcher": "^1.2.0",
+    "xml-formatter": "^3.2.0"
   },
   "devDependencies": {
-    "electron": "^22.0.0",
-    "electron-builder": "^23.6.0"
+    "electron": "^39.8.5",
+    "electron-builder": "^26.8.1"
   }
 }

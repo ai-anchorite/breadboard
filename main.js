@@ -1,10 +1,12 @@
 const {app, shell, BrowserWindow, ipcMain, dialog, clipboard } = require('electron')
-const contextMenu = require('electron-context-menu');
 const path = require("path")
-const Breadmachine = require('breadmachine')
+const BreadboardServer = require('./server')
 const packagejson = require('./package.json')
 const is_mac = process.platform.startsWith("darwin")
-contextMenu({ showSaveImageAs: true });
+
+// Initialize context menu after app is ready (ES module compatibility)
+let contextMenuInitialized = false;
+
 var mainWindow;
 var root_url;
 var wins = {}
@@ -49,9 +51,20 @@ class Socket {
     console.log("msg", msg)
   }
 }
-const breadmachine = new Breadmachine();
+const breadboard = new BreadboardServer();
 app.whenReady().then(async () => {
-  await breadmachine.init({
+  // Initialize context menu with dynamic import for ES module compatibility
+  if (!contextMenuInitialized) {
+    try {
+      const contextMenu = await import('electron-context-menu');
+      contextMenu.default({ showSaveImageAs: true });
+      contextMenuInitialized = true;
+    } catch (error) {
+      console.log('Error loading context menu:', error);
+    }
+  }
+
+  await breadboard.init({
     theme,
     config: path.resolve(__dirname, "breadboard.yaml"),
     socket: new Socket(),
@@ -62,36 +75,36 @@ app.whenReady().then(async () => {
     },
     onconnect: (session) => {
       // Request handlers for api.js
-      breadmachine.ipc[session].handle("theme", (_session, _theme) => {
+      breadboard.ipc[session].handle("theme", (_session, _theme) => {
         // set the theme for ALL windows
-        breadmachine.ipc[_session].theme = _theme
+        breadboard.ipc[_session].theme = _theme
         let all = BrowserWindow.getAllWindows()
         for(win of all) {
           if (win.setTitleBarOverlay) {
-            const overlay = titleBarOverlay(breadmachine.ipc[_session].theme)
+            const overlay = titleBarOverlay(breadboard.ipc[_session].theme)
             win.setTitleBarOverlay(overlay)
           }
         }
       })
-      breadmachine.ipc[session].handle('debug', (_session) => {
+      breadboard.ipc[session].handle('debug', (_session) => {
         // open debug console for only the current window
         let win = wins[_session]
         if (win) {
           win.openDevTools()
         }
       })
-      breadmachine.ipc[session].handle('select', async (_session) => {
+      breadboard.ipc[session].handle('select', async (_session) => {
         // only open one dialog
         let res = await dialog.showOpenDialog({ properties: ['openDirectory', 'showHiddenFiles'] })
         if (!res.canceled && res.filePaths && res.filePaths.length > 0) {
           return res.filePaths
         }
       })
-      breadmachine.ipc[session].handle('open', async (_session, file_path) => {
+      breadboard.ipc[session].handle('open', async (_session, file_path) => {
         // only one
         await shell.showItemInFolder(file_path)
       })
-      breadmachine.ipc[session].handle('pinned', (_session) => {
+      breadboard.ipc[session].handle('pinned', (_session) => {
         let win = wins[_session]
         let ontop = win.isAlwaysOnTop()
         if (win) {
@@ -100,7 +113,7 @@ app.whenReady().then(async () => {
           return { pinned: false }
         }
       })
-      breadmachine.ipc[session].handle('pin', (_session) => {
+      breadboard.ipc[session].handle('pin', (_session) => {
         // pin the current window ONLY
         let win = wins[_session]
         if (win) {
@@ -166,9 +179,9 @@ app.whenReady().then(async () => {
     });
   })
 
-  createWindow(breadmachine.port)
+  createWindow(breadboard.port)
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(breadmachine.port)
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(breadboard.port)
   })
   app.on('window-all-closed', function () {
     if (process.platform !== 'darwin') app.quit()

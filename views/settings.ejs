@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>breadboard</title>
+    <link href="/css/fontawesome.min.css" rel="stylesheet">
+    <link href="/css/solid.min.css" rel="stylesheet">
+    <link href="/css/regular.min.css" rel="stylesheet">
+    <link href="/css/brands.min.css" rel="stylesheet">
+    <link href="./global.css" rel="stylesheet" />
+    <% if (agent === "electron") { %>
+    <link href="./electron.css" rel="stylesheet" />
+    <% } %>
+    <style>
+    body.default #reindex2 {
+      background: royalblue;
+      color: white;
+    }
+    body.dark #reindex2 {
+      background: cornflowerblue;
+      color: white;
+    }
+    </style>
+  </head>
+  <body class="<%=theme%>" data-style="<%=style%>">
+    <div id='bar'></div>
+    <nav class="<%=platform%>">
+      <div class='nav-unit left-menu'>
+        <a title="home" class='btn' href="/" class='btn'><i class="fa-solid fa-house"></i></a>
+        <button title='back' id='prev'><i class="fa-solid fa-chevron-left"></i></button>
+        <button title='forward' id='next'><i class="fa-solid fa-chevron-right"></i></button>
+        <a id='bookmarked-filters' title="bookmakred filters" class='btn' href="/favorites"><i class="fa-solid fa-star"></i></a>
+        <a id='favorited-items' title="liked items" class='btn' href="/?query=tag:favorite"><i class="fa-solid fa-heart"></i></a>
+        <div class='right-menu'>
+          <div class='flexible'></div>
+          <button id='show-menu'><i class="fa-solid fa-bars"></i></button>
+          <button id='minimize' title='minimize to player mode'><i class="fa-solid fa-bars"></i></button>
+        </div>
+      </div>
+      <div class='status'></div>
+      <div class='search-box minimal'>
+        <input type='search' placeholder='search' class='search flexible'>
+      </div>
+      <div class='nav-unit nav-actions'>
+        <button id='live-option' title="turn live update on or off"><i class="fa-solid fa-power-off fa-spin"></i></button>
+        <a id='settings-option' title="settings" class='btn' href="/settings"><i class="fa-solid fa-gear"></i></a>
+        <a id='help-option' title="information and community" class='btn' href="/help"><i class="fa-solid fa-question"></i></a>
+        <button title='notifications' id='notification' class= 'hidden'><i class="fa-solid fa-bell"></i></button>
+        <button id='new-window' title='open a new window'><i class="fa-solid fa-plus"></i></button>
+      </div>
+    </nav>
+    <div class='settings'></div>
+    <script src="./socket.io.js"></script>
+    <script src='./popper.js'></script>
+    <script src='./tippy.js'></script>
+    <script src="./modules/api.js"></script>
+    <script src="./modules/db.js"></script>
+    <script src="./modules/zoomer.js"></script>
+    <script src="./dexie.js"></script>
+    <script>
+    let backup;
+    const AGENT = "<%=agent%>"
+    const VERSION = "<%=version%>"
+    const MACHINE_VERSION = "<%=machine_version%>"
+    const api = new API()
+    const db = new DB(api);
+    const init_theme = async () => {
+      let theme = await db.user.settings.where({ key: "theme" }).first()
+      if (!theme) theme = { val: "default" }
+      document.body.className = theme.val
+      document.querySelector("html").className = theme.val
+      api.theme(theme.val)
+    }
+    const search = (query) => {
+      if (query && query.length > 0) {
+        location.href = "/?query=" + query
+      } else {
+        location.href = "/"
+      }
+    }
+
+    const renderSettings = async () => {
+      let res = await db.user.folders.toArray()
+      let rows
+      if (res.length > 0) {
+        rows = res.map((r) => {
+          console.log("r", r)
+          let query = `file_path:"${r.name}"`
+          console.log("query", query)
+          return `<div class='row'>
+          <div><a href="/?query=${encodeURIComponent(query)}">${r.name}</a></div>
+          <div class='flexible'></div>
+          <button class='reindex-folder' data-name='${r.name}'><i class="fa-solid fa-rotate"></i> Re-index</button> 
+      </div>`
+        }).join("")
+      } else {
+        rows = "<div class='center-faded'>To get started, click 'edit' to connect folders</div>"
+      }
+
+/*
+      let currentZoom = await user.settings.where({ key: "zoom" }).first()
+      let zoom;
+      if (currentZoom) {
+        zoom = currentZoom.val
+      } else {
+        zoom = Math.round(100 / window.devicePixelRatio)
+      }
+      */
+
+      let logout_url = `${location.protocol}//log:out@${location.host}`
+      document.querySelector(".settings").innerHTML = `<main>
+      <div class='header'>
+        <h2>Version</h2>
+      </div>
+      <div class='rows'>
+        <div class='row'>AGENT: ${AGENT} ${VERSION}</div>
+        <div class='row'>CORE: breadmachine ${MACHINE_VERSION}</div>
+      </div>
+      <br><br>
+      <!--
+      <div class='header'>
+        <h2>Live Slideshow</h2>
+      </div>
+      <div class='rows'>
+        <div class='row'>
+          <div>Start live slideshow</div>
+          <div class='flexible'></div>
+          <button id='slide'><i class="fa-solid fa-expand"></i> Start</button> 
+        </div>
+      </div>
+      <br><br>
+      -->
+      <div class='header'>
+        <h2>Connected Folders</h2>
+        <div>&nbsp;&nbsp;</div>
+        <a href="/connect" class='btn primary'><i class="fa-regular fa-pen-to-square"></i> Edit</a>
+      </div>
+      <div class='rows'>
+      ${rows}
+      </div>
+      <br><br>
+      <div class='header'>
+        <h2>Theme</h2>
+        <div class='flexible'></div>
+      </div>
+      <div class='rows'>
+        <div class='row'>
+          <button id='dark-theme'><i class="fa-solid fa-moon"></i> Dark</button>
+          <button id='default-theme'><i class="fa-regular fa-sun"></i> Light</button>
+        </div>
+      </div>
+      <br><br>
+      <div class='header'>
+        <h2>Re-index</h2>
+        <div class='flexible'></div>
+      </div>
+      <div class='rows'>
+        <div class='row'>
+          <button id='reindex'><i class="fa-solid fa-rotate"></i> Re-index from Scratch</button>
+        </div>
+      </div>
+      <% if (agent === "electron") { %>
+        <br><br>
+        <div class='header'>
+          <h2>Debug</h2>
+          <div class='flexible'></div>
+        </div>
+        <div class='rows'>
+          <div class='row'>
+            <button id='debug'><i class="fa-solid fa-terminal"></i> Debug</button>
+          </div>
+        </div>
+      <% } %>
+      <% if (agent === "web") { %>
+        <br><br>
+        <div class='header'>
+          <h2>Session</h2>
+          <div class='flexible'></div>
+        </div>
+        <div class='rows'>
+          <div class='row'>
+            <% if (authorized) { %>
+              <a class='btn' href="${logout_url}"><i class="fa-solid fa-arrow-right-from-bracket"></i> Logout</a>
+            <% } else { %>
+              <div class='explain'>
+              <div class='warning'><i class="fa-solid fa-lock"></i> Create a login</div>
+              <div>If you are running Breadboard on the open web, anyone can access your breadboard (and even delete files).</div>
+              <br>
+              <div>To password-protect breadboard, create a login.</div>
+              <ol>
+                <li>Open <code><%=config%></code></li>
+                <li>Uncomment the <code>accounts</code> section and customize the username/password (You can add as many accounts as you want)</li>
+                <li>Restart the app</li>
+              </ol>
+              <div>For example if you want two accounts <code>admin</code> and <code>cocktailpeanut</code>, each with a password, it may look like this:</div>
+  <pre>accounts:
+  admin: password
+  cocktailpeanut: saltypassword</pre>
+              </div>
+            <% } %>
+          </div>
+        </div>
+      <% } %>
+    </main>`
+//      var app = { zoom }
+//      const zoomer = new Zoomer(app)
+//      await zoomer.init()
+
+      document.querySelector("#prev").addEventListener("click", (e) => {
+        history.back()
+      })
+      document.querySelector("#next").addEventListener("click", (e) => {
+        history.forward()
+      })
+//      document.querySelector("input[type=range]").addEventListener("input", async (e) => {
+//        e.preventDefault()
+//        e.stopPropagation()
+//        //window.electronAPI.zoom(e.target.value)
+//        let zoom = parseInt(e.target.value)
+//        await user.settings.put({ key: "zoom", val: e.target.value })
+//        e.target.closest(".rows").querySelector(".currentZoom").innerHTML = "" + e.target.value + "%"
+//        app.zoom = parseInt(e.target.value)
+//        zoomer.resized()
+//      })
+      document.querySelector("#reindex").addEventListener("click", async (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+
+        // 1. Delete the DB
+        await db.db.delete()
+
+        // 2. Delete the checkpoint table
+        await db.user.checkpoints.clear()
+
+
+        // 2. Send to reindex (the home page will read the localStorage to automatically fill the favorites and settings DB after reindexing)
+        location.href = "/?synchronize=reindex"
+      })
+      <% if (agent === "electron") { %>
+      document.querySelector("#debug").addEventListener('click', async (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        api.debug()
+      })
+      <% } %>
+      document.querySelector(".settings").addEventListener("click", async (e) => {
+        let delTarget = (e.target.classList.contains("del") ? e.target : e.target.closest(".del"))
+        let reindexTarget = (e.target.classList.contains("reindex-folder") ? e.target : e.target.closest(".reindex-folder"))
+        if (delTarget) {
+          e.preventDefault()
+          e.stopPropagation()
+          const confirmed = confirm("disconnect the folder?")
+          if (confirmed) {
+            let name = delTarget.getAttribute("data-name")
+            // Delete the folder
+            await db.user.folders.where({ name }).delete()
+            // Delete all the files in the folder
+            await db.db.files.where({ root_path: name }).delete()
+            // Delete the checkpoint
+            await db.user.checkpoints.where({ root_path: name }).delete()
+            location.href = location.href
+          }
+        } else if (reindexTarget) {
+          e.preventDefault()
+          e.stopPropagation()
+          let name = reindexTarget.getAttribute("data-name")
+          // Delete all the files in the folder
+          await db.db.files.where({ root_path: name }).delete()
+          // Delete the checkpoint
+          await db.user.checkpoints.where({ root_path: name }).delete()
+          location.href = "/?synchronize=reindex_folder&sync_folder="+encodeURIComponent(name)
+        }
+      })
+      document.querySelector("#dark-theme").addEventListener('click', async (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        await db.user.settings.put({ key: "theme", val: "dark" })
+        await init_theme()
+      })
+      document.querySelector("#default-theme").addEventListener('click', async (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        await db.user.settings.put({ key: "theme", val: "default" })
+        await init_theme()
+      })
+      document.querySelector(".search").addEventListener("keyup", (e) => {
+        if (e.key === "Enter") {
+          location.href = "/?query=" + e.target.value
+        }
+      })
+      /*
+      document.querySelector("#slide").addEventListener("click", (e) => {
+        location.href = "/screen"
+      })
+      */
+      settingsRendered = true
+    }
+    (async () => {
+      await db.init()
+      await init_theme()
+      await renderSettings()
+    })();
+    </script>
+  </body>
+</html>
