@@ -120,7 +120,7 @@ npm run dist
 
 Original Breadboard by [cocktailpeanut](https://github.com/cocktailpeanut/breadboard)
 
-Video system inspired by [VideoSwarm](https://github.com/cocktailpeanut/videoswarm)
+Video system inspired by [VideoSwarm](https://github.com/cerzi/videoswarm)
 
 <br>
 
@@ -129,7 +129,6 @@ Video system inspired by [VideoSwarm](https://github.com/cocktailpeanut/videoswa
 ## Run Locally
 
 ```bash
-cd app
 npm install
 npm start
 ```
