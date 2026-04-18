@@ -24,6 +24,7 @@ class VideoApp {
     this.setupVideoWatchers();
     this.loadExistingVideos();
     this.createSettingsPanel();
+    this.setupKeyboardNavigation();
   }
 
   loadSettings() {
@@ -138,7 +139,10 @@ class VideoApp {
   }
 
   async loadExistingVideos() {
-    if (!window.electronAPI?.getAllVideos) return;
+    if (!window.electronAPI?.getAllVideos) {
+      console.log('Video API not ready yet');
+      return;
+    }
 
     try {
       const result = await window.electronAPI.getAllVideos();
@@ -191,6 +195,43 @@ class VideoApp {
     if (panel) {
       panel.classList.toggle('open');
     }
+  }
+
+  setupKeyboardNavigation() {
+    document.addEventListener('keydown', (e) => {
+      const expandedCard = document.querySelector('.video-card.expanded');
+      if (!expandedCard) return;
+
+      const fingerprint = expandedCard.dataset.fingerprint;
+      const currentIndex = this.videos.findIndex(v => v.fingerprint === fingerprint);
+
+      if (e.key === 'ArrowLeft' && currentIndex > 0) {
+        // Previous video
+        e.preventDefault();
+        const prevVideo = this.videos[currentIndex - 1];
+        this.toggleExpandVideo(fingerprint); // Close current
+        setTimeout(() => this.toggleExpandVideo(prevVideo.fingerprint), 100); // Open previous
+      } else if (e.key === 'ArrowRight' && currentIndex < this.videos.length - 1) {
+        // Next video
+        e.preventDefault();
+        const nextVideo = this.videos[currentIndex + 1];
+        this.toggleExpandVideo(fingerprint); // Close current
+        setTimeout(() => this.toggleExpandVideo(nextVideo.fingerprint), 100); // Open next
+      } else if (e.key === 'Escape') {
+        // Close expanded video
+        e.preventDefault();
+        this.toggleExpandVideo(fingerprint);
+      } else if (e.key === ' ' || e.code === 'Space') {
+        // Toggle play/pause
+        e.preventDefault();
+        const video = expandedCard.querySelector('video');
+        if (video.paused) {
+          video.play();
+        } else {
+          video.pause();
+        }
+      }
+    });
   }
 
   async selectFolder() {
@@ -354,8 +395,8 @@ class VideoApp {
 
       // Hover to preview
       card.addEventListener('mouseenter', () => {
-        // Only play on hover if not explicitly playing
-        if (!this.playingVideos.has(fingerprint)) {
+        // Only play on hover if not explicitly playing and not expanded
+        if (!this.playingVideos.has(fingerprint) && !card.classList.contains('expanded')) {
           if (videoElement.src) {
             videoElement.play().catch(() => {});
           }
@@ -363,11 +404,20 @@ class VideoApp {
       });
 
       card.addEventListener('mouseleave', () => {
-        // Only pause on leave if not explicitly playing
-        if (!this.playingVideos.has(fingerprint)) {
+        // Only pause on leave if not explicitly playing and not expanded
+        if (!this.playingVideos.has(fingerprint) && !card.classList.contains('expanded')) {
           videoElement.pause();
           videoElement.currentTime = 0;
         }
+      });
+
+      // Click on card to expand
+      card.addEventListener('click', (e) => {
+        // Don't expand if clicking on buttons
+        if (e.target.closest('.video-card-btn')) {
+          return;
+        }
+        this.toggleExpandVideo(fingerprint);
       });
 
       // Play button
@@ -416,6 +466,53 @@ class VideoApp {
         }
       });
     });
+  }
+
+  toggleExpandVideo(fingerprint) {
+    const card = document.querySelector(`.video-card[data-fingerprint="${fingerprint}"]`);
+    if (!card) return;
+
+    const isExpanded = card.classList.contains('expanded');
+    
+    // Close any other expanded cards
+    document.querySelectorAll('.video-card.expanded').forEach(c => {
+      if (c !== card) {
+        c.classList.remove('expanded');
+        const v = c.querySelector('video');
+        if (v) {
+          v.controls = false;
+          v.muted = true;
+          if (!this.playingVideos.has(c.dataset.fingerprint)) {
+            v.pause();
+            v.currentTime = 0;
+          }
+        }
+      }
+    });
+
+    const videoElement = card.querySelector('video');
+
+    if (isExpanded) {
+      // Collapse
+      card.classList.remove('expanded');
+      videoElement.controls = false;
+      videoElement.muted = true;
+      if (!this.playingVideos.has(fingerprint)) {
+        videoElement.pause();
+        videoElement.currentTime = 0;
+      }
+    } else {
+      // Expand
+      card.classList.add('expanded');
+      videoElement.controls = true;
+      videoElement.muted = false;
+      if (videoElement.src) {
+        videoElement.play().catch(() => {});
+      }
+      
+      // Scroll card into view
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   }
 
   createVideoCard(video) {

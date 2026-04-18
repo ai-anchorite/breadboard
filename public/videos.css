@@ -33,6 +33,23 @@
   transform: scale(1.02);
 }
 
+.video-card.expanded {
+  grid-column: 1 / -1;
+  max-width: 1200px;
+  margin: 0 auto;
+  transform: scale(1);
+}
+
+.video-card.expanded:hover {
+  transform: scale(1);
+}
+
+.video-card.expanded video {
+  max-height: 80vh;
+  width: 100%;
+  height: auto;
+}
+
 .video-card video {
   width: 100%;
   height: auto;
