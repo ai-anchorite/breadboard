@@ -2,8 +2,6 @@ const card = (meta, stripPunctuation, recycle) => {
   let attributes = Object.keys(meta).map((key) => {
     return { key, val: meta[key] }
   })
-  let times = `<tr><td>created</td><td>${timeago.format(meta.btime)}</td></tr>
-<tr><td>modified</td><td>${timeago.format(meta.mtime)}</td></tr>`
 
   let tags = []
   for(let attr of attributes) {
@@ -18,9 +16,10 @@ const card = (meta, stripPunctuation, recycle) => {
   }
   let is_favorited = tags.includes("tag:favorite")
 
+  // Filter out fields we don't want to display
   let trs = attributes.filter((attr) => {
-    //return attr.key !== "app" && attr.key !== "tokens"
-    return attr.key !== "root_path"
+    // Exclude: root_path, mtime, btime, id, tokens (shown as tags separately)
+    return !["root_path", "mtime", "btime", "id", "tokens"].includes(attr.key)
   }).map((attr) => {
     let el
     if (attr.key === "model_name") {
@@ -33,7 +32,8 @@ const card = (meta, stripPunctuation, recycle) => {
       el = `<span class='token' data-value="${attr.val}">${attr.val}</span>`
     } else if (attr.key === "agent" && attr.val) {
       el = `<span class='token' data-value="${attr.val}">${attr.val}</span>`
-    } else if (attr.key === "tokens") {
+    } else if (attr.key === "tags") {
+      // This is handled separately, shouldn't reach here
       let val = []
       if (attr.val && attr.val.length > 0) {
         val = attr.val
@@ -46,7 +46,6 @@ const card = (meta, stripPunctuation, recycle) => {
 </span>`
       })
       el = els.join("")
-      attr.key = "tags"
     } else if (attr.key === "prompt" && attr.val) {
       if (attr.val && typeof attr.val === "string" && attr.val.length > 0) {
         let tokens = stripPunctuation(attr.val).split(/\s/)
@@ -88,6 +87,16 @@ const card = (meta, stripPunctuation, recycle) => {
 </tr>`
   }).join("")
 
+  // Separate tags row for better display
+  let tagsRow = ""
+  if (tags.length > 0) {
+    let tagEls = tags.map((x) => {
+      return `<span data-tag="${x}">
+<button data-value="${x}" class='token tag-item'><i class="fa-solid fa-tag"></i> ${x.replace("tag:", "")}</button>
+</span>`
+    }).join("")
+    tagsRow = `<div class='tags-row'>${tagEls}</div>`
+  }
 
   let favClass = (is_favorited ? "fa-solid fa-heart" : "fa-regular fa-heart")
 
@@ -95,7 +104,7 @@ const card = (meta, stripPunctuation, recycle) => {
 <button title='like this item' data-favorited="${is_favorited}" data-src="${meta.file_path}" class='favorite-file'><i class="${favClass}"></i></button>
 <button title='raw file' data-src="${meta.file_path}" class='open-file'><i class="fa-regular fa-folder-open"></i></button>
 <button title='image viewer' class='gofullscreen'><i class="fa-solid fa-eye"></i></button>
-<button title='pop out to a new window' class='popup' data-src="/card?file=${encodeURIComponent(meta.file_path)}"><i class="fa-solid fa-up-right-from-square"></i></button>
+<button title='pop out image viewer' class='popup' data-src="/viewer?file=${encodeURIComponent(meta.file_path)}"><i class="fa-solid fa-up-right-from-square"></i></button>
 </div>
 <div class='row'>
   <img loading='${recycle ? "eager" : "lazy"}' data-root="${meta.root_path}" data-src="${meta.file_path}" src="/file?file=${encodeURIComponent(meta.file_path)}">
@@ -104,14 +113,16 @@ const card = (meta, stripPunctuation, recycle) => {
     <div>
       <div class='more hidden'><i class="fa-solid fa-angles-down"></i> view more</div>
     </div>
-    <div class='xmp'>
-      <div class='card-header'>
+    ${tagsRow}
+    <div class='metadata-section'>
+      <div class='metadata-header'>
         <button title='copy the prompt to clipboard' class='copy-text' data-value="${meta.prompt}"><i class='fa-regular fa-clone'></i> <span>Copy Prompt</span></button>
-        <button title='view the metadata in standardized XML' class='view-xmp' data-src="${meta.file_path}"><i class="fa-solid fa-code"></i> View XML</button>
+        <button title='show/hide detailed metadata' class='toggle-metadata'><i class="fa-solid fa-chevron-down"></i> Show Details</button>
       </div>
-      <textarea readonly class='hidden slot'></textarea>
+      <div class='metadata-details hidden'>
+        <table>${trs}</table>
+      </div>
     </div>
-    <table>${times}${trs}</table>
   </div>
 </div>`
 }

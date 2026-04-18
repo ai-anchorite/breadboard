@@ -408,6 +408,13 @@ class Navbar {
       <input id='image-width' type='range' min="0" max="100" value="${this.app.style.image_width}" step="1">
     </div>
   </div>
+  <br>
+  <div class='row'>
+    <div>slideshow interval => ${this.app.style.slideshow_interval / 1000}s</div>
+    <div class='flex'>
+      <input id='slideshow-interval' type='range' min="1" max="10" value="${this.app.style.slideshow_interval / 1000}" step="0.5">
+    </div>
+  </div>
   <hr>
   <h3><i class="fa-solid fa-recycle"></i> Recycle</h3>
   <div class='row recycle-check'>
@@ -470,6 +477,14 @@ class Navbar {
           let aspect_ratio = parseInt(e.target.value)
           e.target.closest(".row").querySelector("div").innerHTML = "image_width : card_width => " + e.target.value + "%"
           await this.app.user.settings.put({ key: "image_width", val: aspect_ratio })
+          await this.app.init_style()
+        })
+        document.querySelector("#slideshow-interval").addEventListener("input", async (e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          let interval = parseFloat(e.target.value) * 1000  // Convert seconds to milliseconds
+          e.target.closest(".row").querySelector("div").innerHTML = "slideshow interval => " + e.target.value + "s"
+          await this.app.user.settings.put({ key: "slideshow_interval", val: interval })
           await this.app.init_style()
         })
         document.querySelectorAll(".fit-selector input[type=radio]").forEach((el) => {

@@ -59,6 +59,10 @@ class Socket {
   }
 }
 const breadboard = new BreadboardServer();
+
+// Disable disk cache to avoid cache errors
+app.commandLine.appendSwitch('disable-http-cache');
+
 app.whenReady().then(async () => {
   // Initialize context menu with dynamic import for ES module compatibility
   if (!contextMenuInitialized) {
@@ -76,10 +80,6 @@ app.whenReady().then(async () => {
     config: path.resolve(__dirname, "breadboard.yaml"),
     socket: new Socket(),
     version: packagejson.version,
-    releases: {
-      feed: "https://github.com/cocktailpeanut/breadboard/releases.atom",
-      url: "https://github.com/cocktailpeanut/breadboard/releases"
-    },
     onconnect: (session) => {
       // Request handlers for api.js
       breadboard.ipc[session].handle("theme", (_session, _theme) => {
@@ -163,22 +163,35 @@ app.whenReady().then(async () => {
       let [width, height] = win.getSize()
       let [x,y] = win.getPosition()
       if (features && features.startsWith("popup")) {
-        return {
+        // Check if this is a viewer popup (larger, resizable, with title bar)
+        const isViewer = url.includes('/viewer?')
+        const windowOptions = {
           action: 'allow',
           outlivesOpener: true,
           overrideBrowserWindowOptions: {
-            width: (params.get("width") ? parseInt(params.get("width")) : width),
-            height: (params.get("height") ? parseInt(params.get("height")) : height),
+            width: isViewer ? Math.floor(width * 0.6) : (params.get("width") ? parseInt(params.get("width")) : width),
+            height: isViewer ? Math.floor(height * 0.8) : (params.get("height") ? parseInt(params.get("height")) : height),
             x: x + 30,
             y: y + 30,
             parent: null,
-            titleBarStyle : "hidden",
-            titleBarOverlay : titleBarOverlay(),
+            resizable: true,
+            movable: true,
+            minimizable: true,
+            maximizable: true,
+            autoHideMenuBar: isViewer ? true : false,
             webPreferences: {
               preload: path.join(__dirname, 'preload.js')
             },
           }
         }
+        
+        // Only use hidden title bar for non-viewer popups
+        if (!isViewer) {
+          windowOptions.overrideBrowserWindowOptions.titleBarStyle = "hidden"
+          windowOptions.overrideBrowserWindowOptions.titleBarOverlay = titleBarOverlay()
+        }
+        
+        return windowOptions
       } else {
         shell.openExternal(url);
       }

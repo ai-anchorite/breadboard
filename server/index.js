@@ -10,7 +10,6 @@ const yaml = require('js-yaml');
 const Watcher = require('watcher');
 const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
-const Updater = require('./updater/index')
 const BasicAuth = require('./basicauth')
 const IPC = require('./ipc')
 const Diffusionbee = require('./crawler/diffusionbee')
@@ -86,10 +85,6 @@ class BreadboardServer {
     }
 
     this.engines = {}
-
-    await this.updateCheck().catch((e) => {
-      console.log("update check error", e)
-    })
     
     this.start()
   }
@@ -361,6 +356,16 @@ class BreadboardServer {
       })
     })
     
+    app.get('/viewer', (req, res) => {
+      let session = this.auth(req, res)
+      res.render("viewer", {
+        agent: req.agent,
+        theme: this.ipc[session].theme,
+        version: this.version,
+        file_path: req.query.file
+      })
+    })
+    
     app.get('/screen', (req, res) => {
       let session = this.auth(req, res)
       res.render("screen", {
@@ -388,27 +393,6 @@ class BreadboardServer {
     })
     
     this.app = app
-  }
-  
-  async updateCheck() {
-    if (this.config.releases) {
-      const releaseFeed = this.config.releases.feed
-      const releaseURL = this.config.releases.url
-      const updater = new Updater()
-      let res = await updater.check(releaseFeed)
-      if (res.feed && res.feed.entry) {
-        let latest = (Array.isArray(res.feed.entry) ? res.feed.entry[0] : res.feed.entry)
-        if (latest.title === this.version) {
-          console.log("UP TO DATE", latest.title, this.version)
-        } else {
-          console.log("Need to update to", latest.id, latest.updated, latest.title)
-          this.need_update = {
-            $url: releaseURL,
-            latest
-          }
-        }
-      }
-    }
   }
 }
 

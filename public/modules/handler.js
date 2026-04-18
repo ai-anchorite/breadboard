@@ -1,16 +1,35 @@
 class Handler {
   view(selectedCard) {
-    let img = selectedCard.querySelector("img").cloneNode()
-    let scaleFactor = Math.min(window.innerWidth / img.naturalWidth, window.innerHeight / img.naturalHeight)
-    if (this.viewer) this.viewer.destroy()
+    // Get all cards currently displayed in the content area
+    const allCards = Array.from(document.querySelectorAll('.content .card'));
+    const selectedIndex = allCards.indexOf(selectedCard);
+    
+    // Create a container with all images for the viewer
+    const container = document.createElement('div');
+    container.style.display = 'none';
+    allCards.forEach(card => {
+      const img = card.querySelector('img');
+      if (img) {
+        const clonedImg = img.cloneNode();
+        container.appendChild(clonedImg);
+      }
+    });
+    document.body.appendChild(container);
+    
+    if (this.viewer) this.viewer.destroy();
     let self = this;
-    this.viewer = new Viewer(img, {
+    this.viewer = new Viewer(container, {
+      inline: false,
+      initialViewIndex: selectedIndex >= 0 ? selectedIndex : 0,
       transition: false,
+      interval: this.app.style.slideshow_interval,  // Use setting from app
       toolbar: {
         'zoomIn': true,
         'zoomOut': true,
         'reset': true,
+        'prev': true,
         'play': true,
+        'next': true,
         'oneToOne': true,
         'rotateLeft': true,
         'rotateRight': true,
@@ -21,14 +40,26 @@ class Handler {
         self.zoomRatio = e.detail.ratio
       },
       viewed() {
-        if (self.zoomRatio) {
-          this.viewer.zoomTo(self.zoomRatio)
-        } else {
-          this.viewer.zoomTo(scaleFactor)
+        // Reset zoom ratio for auto-fit on each image
+        self.zoomRatio = null;
+        
+        const img = self.viewer.image;
+        if (img && img.naturalWidth && img.naturalHeight) {
+          // Account for toolbar (50px) and navbar (50px) in height calculation
+          const availableHeight = window.innerHeight - 100;
+          const scaleFactor = Math.min(
+            window.innerWidth / img.naturalWidth, 
+            availableHeight / img.naturalHeight
+          );
+          self.viewer.zoomTo(scaleFactor);
         }
       },
       hidden() {
-        this.viewer.destroy()
+        this.viewer.destroy();
+        // Clean up the container
+        if (container.parentNode) {
+          container.parentNode.removeChild(container);
+        }
       }
     });
     this.viewer.show()
@@ -51,7 +82,6 @@ class Handler {
       let tokenPopupTarget = (e.target.classList.contains(".popup-link") ? e.target : e.target.closest(".popup-link"))
       let grabTarget = (e.target.classList.contains(".grab") ? e.target : e.target.closest(".grab"))
       let openFileTarget = (e.target.classList.contains(".open-file") ? e.target : e.target.closest(".open-file"))
-      let displayMetaTarget = (e.target.classList.contains(".view-xmp") ? e.target : e.target.closest(".view-xmp"))
       let favoriteFileTarget = (e.target.classList.contains(".favorite-file") ? e.target : e.target.closest(".favorite-file"))
       let card = (e.target.classList.contains("card") ? e.target : e.target.closest(".card"))
       if (card) card.classList.remove("fullscreen")
@@ -63,16 +93,19 @@ class Handler {
       } else if (openFileTarget) {
         this.api.open(openFileTarget.getAttribute("data-src"))
       } else if (popupTarget) {
-        window.open(popupTarget.getAttribute("data-src"), "_blank", "popup,width=512")
+        const url = popupTarget.getAttribute("data-src")
+        const query = document.querySelector(".search").value
+        const fullUrl = query ? `${url}&query=${encodeURIComponent(query)}` : url
+        window.open(fullUrl, "_blank", "popup,width=512")
       } else if (favoriteFileTarget) {
         let data_favorited = favoriteFileTarget.getAttribute("data-favorited")
         let is_favorited = (data_favorited === "true" ? true : false)
         let src = favoriteFileTarget.getAttribute("data-src")
         let root = favoriteFileTarget.closest(".card").querySelector("img").getAttribute("data-root")
-        let favClass
+        
         if (is_favorited) {
           // unfavorite
-          let response = await this.api.gm({
+          await this.api.gm({
             path: "user",
             cmd: "set",
             args: [
@@ -85,14 +118,9 @@ class Handler {
               }
             ]
           })
-          favoriteFileTarget.setAttribute("data-favorited", "false")
-          favClass = "fa-regular fa-heart"
-
-          // remove 'favorite' tag from the tags area
-          favoriteFileTarget.closest(".card").querySelector("tr[data-key=tags] td span[data-tag='tag:favorite']").remove()
         } else {
           // favorite
-          let response = await this.api.gm({
+          await this.api.gm({
             path: "user",
             cmd: "set",
             args: [
@@ -105,24 +133,16 @@ class Handler {
               }
             ]
           })
-          favoriteFileTarget.setAttribute("data-favorited", "true")
-          favClass = "fa-solid fa-heart"
-
-          // add 'favorite' tag
-          let span = document.createElement("span")
-          span.setAttribute("data-tag", "tag:favorite")
-          span.innerHTML = `<button data-value="tag:favorite" class='token tag-item'><i class="fa-solid fa-tag"></i> favorite</button>`
-          favoriteFileTarget.closest(".card").querySelector("tr[data-key=tags] td.attr-val .content-text").appendChild(span)
         }
-        favoriteFileTarget.querySelector("i").className = favClass
 
+        // Synchronize to refresh the card with updated metadata
         await this.app.synchronize([{ file_path: src, root_path: root }], async () => {
           document.querySelector(".status").innerHTML = ""
-          let sync_button = document.querySelector("#sync")
-          if (sync_button) {
-            sync_button.classList.remove("disabled")
-            sync_button.disabled = false
-            document.querySelector("#sync i").classList.remove("fa-spin")
+          let query = document.querySelector(".search").value
+          if (query && query.length > 0) {
+            await this.app.search(query)
+          } else {
+            await this.app.search()
           }
         })
       } else if (grabTarget) {
@@ -184,13 +204,24 @@ class Handler {
         let key = tokenPopupTarget.getAttribute("data-key")
         let val = tokenPopupTarget.getAttribute("data-value")
         this.app.navbar.input(key, val)
-      } else if (displayMetaTarget) {
-        let file_path = displayMetaTarget.getAttribute("data-src")
-        let xml = await this.api.xmp(file_path)
-        let textarea = displayMetaTarget.closest(".xmp").querySelector(".slot")
-        textarea.classList.toggle("hidden")
-        textarea.value = xml;
-        textarea.style.height = "" + (textarea.scrollHeight + 2) + "px";
+      } else if (e.target.closest(".toggle-metadata")) {
+        // Handle metadata details toggle
+        let button = e.target.closest(".toggle-metadata")
+        let card = button.closest(".card")
+        let details = card.querySelector(".metadata-details")
+        let icon = button.querySelector("i")
+        
+        details.classList.toggle("hidden")
+        
+        if (details.classList.contains("hidden")) {
+          icon.classList.remove("fa-chevron-up")
+          icon.classList.add("fa-chevron-down")
+          button.innerHTML = '<i class="fa-solid fa-chevron-down"></i> Show Details'
+        } else {
+          icon.classList.remove("fa-chevron-down")
+          icon.classList.add("fa-chevron-up")
+          button.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Hide Details'
+        }
       } else if (colTarget && e.target.closest(".card.expanded")) {
         // if clicked inside the .col section when NOT expanded, don't do anything.
         // except the clipboard button
