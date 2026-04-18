@@ -66,7 +66,7 @@ Supports common video formats:
 1. Clone the repository:
 ```bash
 git clone https://github.com/ai-anchorite/breadboard.git
-cd breadboard/app
+cd breadboard
 ```
 
 2. Install dependencies:
