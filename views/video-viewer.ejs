@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%=filename%> - Video Viewer</title>
+    <link href="/css/fontawesome.min.css" rel="stylesheet">
+    <link href="/css/solid.min.css" rel="stylesheet">
+    <link href="./global.css" rel="stylesheet" />
+    <% if (agent === "electron") { %>
+    <link href="./electron.css" rel="stylesheet" />
+    <% } %>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      
+      .video-viewer-titlebar {
+        -webkit-app-region: drag;
+        padding: 10px 15px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        user-select: none;
+      }
+      
+      body.default .video-viewer-titlebar {
+        background: white;
+        color: #111;
+        border-bottom: 1px solid rgba(0,0,0,0.1);
+      }
+      
+      body.dark .video-viewer-titlebar {
+        background: #1a1a1a;
+        color: whitesmoke;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+      }
+      
+      .video-viewer-title {
+        flex: 1;
+        font-weight: bold;
+        font-size: 0.9rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      
+      .video-viewer-container {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #000;
+      }
+      
+      video {
+        max-width: 100%;
+        max-height: 100%;
+        width: auto;
+        height: auto;
+      }
+      
+      .video-viewer-controls {
+        padding: 10px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      
+      body.default .video-viewer-controls {
+        background: white;
+        color: #111;
+        border-top: 1px solid rgba(0,0,0,0.1);
+      }
+      
+      body.dark .video-viewer-controls {
+        background: #1a1a1a;
+        color: whitesmoke;
+        border-top: 1px solid rgba(255,255,255,0.1);
+      }
+      
+      .video-filename {
+        flex: 1;
+        font-size: 0.85rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        opacity: 0.7;
+      }
+      
+      .viewer-btn {
+        -webkit-app-region: no-drag;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 8px 12px;
+        border-radius: 4px;
+        transition: background 0.2s;
+        font-size: 0.9rem;
+      }
+      
+      body.default .viewer-btn {
+        color: #111;
+      }
+      
+      body.default .viewer-btn:hover {
+        background: rgba(0,0,0,0.05);
+      }
+      
+      body.dark .viewer-btn {
+        color: whitesmoke;
+      }
+      
+      body.dark .viewer-btn:hover {
+        background: rgba(255,255,255,0.05);
+      }
+    </style>
+  </head>
+  <body class="<%=theme%>">
+    <div class="video-viewer-titlebar">
+      <span class="video-viewer-title"><%=filename%></span>
+    </div>
+    <div class="video-viewer-container">
+      <video 
+        id="viewer-video"
+        src="/video/<%=fingerprint%>" 
+        controls 
+        autoplay
+        loop
+      ></video>
+    </div>
+    <div class="video-viewer-controls">
+      <span class="video-filename"><%=filename%></span>
+      <button class="viewer-btn" id="toggle-loop" title="Toggle loop">
+        <i class="fa-solid fa-repeat"></i> Loop
+      </button>
+      <button class="viewer-btn" id="toggle-controls" title="Toggle controls">
+        <i class="fa-solid fa-sliders"></i> Controls
+      </button>
+    </div>
+    
+    <script>
+      const video = document.getElementById('viewer-video');
+      const loopBtn = document.getElementById('toggle-loop');
+      const controlsBtn = document.getElementById('toggle-controls');
+      
+      // Toggle loop
+      loopBtn.addEventListener('click', () => {
+        video.loop = !video.loop;
+        loopBtn.style.opacity = video.loop ? '1' : '0.5';
+      });
+      
+      // Toggle controls
+      controlsBtn.addEventListener('click', () => {
+        video.controls = !video.controls;
+        controlsBtn.style.opacity = video.controls ? '1' : '0.5';
+      });
+      
+      // Keyboard shortcuts
+      document.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') {
+          e.preventDefault();
+          if (video.paused) {
+            video.play();
+          } else {
+            video.pause();
+          }
+        } else if (e.code === 'ArrowLeft') {
+          video.currentTime = Math.max(0, video.currentTime - 5);
+        } else if (e.code === 'ArrowRight') {
+          video.currentTime = Math.min(video.duration, video.currentTime + 5);
+        } else if (e.code === 'KeyF') {
+          if (document.fullscreenElement) {
+            document.exitFullscreen();
+          } else {
+            video.requestFullscreen();
+          }
+        }
+      });
+    </script>
+  </body>
+</html>

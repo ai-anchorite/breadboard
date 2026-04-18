@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>breadboard - videos</title>
+    <link href="/css/fontawesome.min.css" rel="stylesheet">
+    <link href="/css/solid.min.css" rel="stylesheet">
+    <link href="/css/regular.min.css" rel="stylesheet">
+    <link href="/css/brands.min.css" rel="stylesheet">
+    <link href="./global.css" rel="stylesheet" />
+    <link href="./videos.css" rel="stylesheet" />
+    <% if (agent === "electron") { %>
+    <link href="./electron.css" rel="stylesheet" />
+    <% } %>
+  </head>
+  <body class="<%=theme%>" data-style="<%=style%>">
+    <div id='bar'></div>
+    <nav class="<%=platform%>">
+      <div class='nav-unit left-menu'>
+        <a title="home" class='btn' href="/"><i class="fa-solid fa-house"></i></a>
+        <a title="videos" class='btn active' href="/videos"><i class="fa-solid fa-video"></i></a>
+        <button title='back' id='prev'><i class="fa-solid fa-chevron-left"></i></button>
+        <button title='forward' id='next'><i class="fa-solid fa-chevron-right"></i></button>
+        <div class='right-menu'>
+          <div class='flexible'></div>
+          <button id='show-menu'><i class="fa-solid fa-bars"></i></button>
+          <button id='minimize' title='minimize to player mode'><i class="fa-solid fa-bars"></i></button>
+        </div>
+      </div>
+      <div class='status'></div>
+      <div class='search-box minimal'>
+        <div title="total number of videos" class='content-info'></div>
+        <input type='search' placeholder='search videos' class='search flexible'>
+      </div>
+      <div class='nav-unit nav-actions'>
+        <button id='select-folder' title="select video folder"><i class="fa-solid fa-folder-open"></i> Select Folder</button>
+        <button id='video-settings' title="video settings"><i class="fa-solid fa-sliders"></i></button>
+        <% if (agent === "electron") { %>
+          <button id='pin' title='pin the window always on top'><i class="fa-solid fa-thumbtack"></i></button>
+        <% } %>
+        <a id='settings-option' title="settings" class='btn' href="/settings"><i class="fa-solid fa-gear"></i></a>
+        <a id='help-option' title="information and community" class='btn' href="/help"><i class="fa-solid fa-question"></i></a>
+        <button id='new-window' title='open a new window'><i class="fa-solid fa-plus"></i></button>
+      </div>
+    </nav>
+    
+    <div id="video-app-root"></div>
+    
+    <script>
+      const VERSION = "<%=version%>"
+      const AGENT = "<%=agent%>"
+      const THEME = "<%=theme%>"
+    </script>
+    <script type="module" src="./video-modules/main.js"></script>
+  </body>
+</html>

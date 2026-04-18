@@ -310,7 +310,22 @@ class Handler {
             window.close()
             return
           }
-          target.classList.toggle("expanded")
+          
+          // Close any other expanded cards first
+          const wasExpanded = target.classList.contains("expanded")
+          document.querySelectorAll('.card.expanded').forEach(card => {
+            if (card !== target) {
+              card.classList.remove('expanded')
+            }
+          })
+          
+          // Toggle the clicked card
+          if (wasExpanded) {
+            target.classList.remove("expanded")
+          } else {
+            target.classList.add("expanded")
+          }
+          
           if (target.classList.contains("expanded")) {
             //let img = target.querySelector("img").cloneNode()
             //let scaleFactor = Math.min(window.innerWidth / img.naturalWidth, window.innerHeight / img.naturalHeight)

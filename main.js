@@ -4,12 +4,34 @@ const BreadboardServer = require('./server')
 const packagejson = require('./package.json')
 const is_mac = process.platform.startsWith("darwin")
 
+// Video system imports
+const VideoDatabase = require('./server/video-database')
+const VideoScanner = require('./server/video-scanner')
+const VideoWatcher = require('./server/video-watcher')
+
 // Set userData to local appdata directory for portability
 const appDataPath = path.join(__dirname, '..', 'appdata')
 app.setPath('userData', appDataPath)
 app.setPath('sessionData', path.join(appDataPath, 'sessions'))
 app.setPath('cache', path.join(appDataPath, 'cache'))
 app.setPath('logs', path.join(appDataPath, 'logs'))
+
+// Initialize video system
+const videoDbPath = path.join(appDataPath, 'breadboard', 'videos.db')
+let videoDb = null
+let videoScanner = null
+let videoWatcher = null
+
+function initVideoSystem() {
+  try {
+    videoDb = new VideoDatabase(videoDbPath)
+    videoScanner = new VideoScanner(videoDb)
+    videoWatcher = new VideoWatcher(videoDb, videoScanner)
+    console.log('Video system initialized')
+  } catch (error) {
+    console.error('Failed to initialize video system:', error)
+  }
+}
 
 // Initialize context menu after app is ready (ES module compatibility)
 let contextMenuInitialized = false;
@@ -76,11 +98,15 @@ app.whenReady().then(async () => {
     }
   }
 
+  // Initialize video system
+  initVideoSystem()
+
   await breadboard.init({
     theme,
     config: path.resolve(__dirname, "breadboard.yaml"),
     socket: new Socket(),
     version: packagejson.version,
+    videoDb: videoDb,  // Pass video database to server
     onconnect: (session) => {
       // Request handlers for api.js
       breadboard.ipc[session].handle("theme", (_session, _theme) => {
@@ -146,6 +172,97 @@ app.whenReady().then(async () => {
       })
     }
   })
+  
+  // Video module IPC handlers
+  ipcMain.handle("select-directory", async (event) => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory']
+    })
+    if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+      return result.filePaths
+    }
+    return null
+  })
+  
+  ipcMain.handle("scan-videos", async (event, folderPath, options = {}) => {
+    if (!videoScanner || !videoDb) {
+      return { success: false, error: 'Video system not initialized' }
+    }
+
+    try {
+      const videos = await videoScanner.scanDirectory(folderPath, options, (progress) => {
+        // Send progress updates to renderer
+        event.sender.send('video-scan-progress', progress)
+      })
+
+      // Start watching the folder
+      if (videoWatcher) {
+        videoWatcher.start(folderPath, options, {
+          onAdded: (video) => event.sender.send('video-added', video),
+          onRemoved: (filePath, fingerprint) => event.sender.send('video-removed', { filePath, fingerprint }),
+          onChanged: (video) => event.sender.send('video-changed', video),
+        })
+      }
+
+      return { success: true, videos, count: videos.length }
+    } catch (error) {
+      console.error('Error scanning videos:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle("get-all-videos", async () => {
+    if (!videoDb) {
+      return { success: false, error: 'Video database not initialized' }
+    }
+    try {
+      const videos = videoDb.getAllVideos()
+      return { success: true, videos }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle("video-add-tags", async (event, fingerprints, tags) => {
+    if (!videoDb) return { success: false }
+    try {
+      videoDb.addTags(fingerprints, tags)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle("video-remove-tag", async (event, fingerprints, tag) => {
+    if (!videoDb) return { success: false }
+    try {
+      videoDb.removeTag(fingerprints, tag)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle("video-set-rating", async (event, fingerprints, rating) => {
+    if (!videoDb) return { success: false }
+    try {
+      videoDb.setRating(fingerprints, rating)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle("video-get-tags", async () => {
+    if (!videoDb) return { success: false }
+    try {
+      const tags = videoDb.getAllTags()
+      return { success: true, tags }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+  
   app.on('web-contents-created', (event, webContents) => {
     let wc = webContents
     // override the user-agent header to the current breadboard tab
@@ -166,12 +283,34 @@ app.whenReady().then(async () => {
       if (features && features.startsWith("popup")) {
         // Check if this is a viewer popup (larger, resizable, with title bar)
         const isViewer = url.includes('/viewer?')
+        const isVideoViewer = url.includes('/video-viewer?')
+        
+        let popupWidth, popupHeight;
+        
+        if (isVideoViewer) {
+          // For video viewer, use video dimensions from URL params
+          const videoWidth = params.get("width") ? parseInt(params.get("width")) : 800;
+          const videoHeight = params.get("height") ? parseInt(params.get("height")) : 600;
+          
+          // Add space for title bar (40px) and controls (50px), plus some padding
+          popupWidth = Math.min(videoWidth + 40, width);
+          popupHeight = Math.min(videoHeight + 90, height);
+        } else if (isViewer) {
+          // Image viewer uses 60% of parent window
+          popupWidth = Math.floor(width * 0.6);
+          popupHeight = Math.floor(height * 0.8);
+        } else {
+          // Other popups use params or parent size
+          popupWidth = params.get("width") ? parseInt(params.get("width")) : width;
+          popupHeight = params.get("height") ? parseInt(params.get("height")) : height;
+        }
+        
         const windowOptions = {
           action: 'allow',
           outlivesOpener: true,
           overrideBrowserWindowOptions: {
-            width: isViewer ? Math.floor(width * 0.6) : (params.get("width") ? parseInt(params.get("width")) : width),
-            height: isViewer ? Math.floor(height * 0.8) : (params.get("height") ? parseInt(params.get("height")) : height),
+            width: popupWidth,
+            height: popupHeight,
             x: x + 30,
             y: y + 30,
             parent: null,
@@ -179,7 +318,7 @@ app.whenReady().then(async () => {
             movable: true,
             minimizable: true,
             maximizable: true,
-            autoHideMenuBar: isViewer ? true : false,
+            autoHideMenuBar: (isViewer || isVideoViewer) ? true : false,
             webPreferences: {
               preload: path.join(__dirname, 'preload.js')
             },
@@ -187,7 +326,7 @@ app.whenReady().then(async () => {
         }
         
         // Only use hidden title bar for non-viewer popups
-        if (!isViewer) {
+        if (!isViewer && !isVideoViewer) {
           windowOptions.overrideBrowserWindowOptions.titleBarStyle = "hidden"
           windowOptions.overrideBrowserWindowOptions.titleBarOverlay = titleBarOverlay()
         }
