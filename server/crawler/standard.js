@@ -44,10 +44,14 @@ class Standard {
         )
       } catch (e) {
         console.log("ERROR sync", filename, e)
+        // Return minimal agent_info on error so sync can continue
+        // Don't throw - just log and continue with what we have
       }
     } else {
       // agent_info: null => image file does not exist
       // IGNORE
+      console.log("Warning: Image file does not exist:", filename)
+      return null
     }
 
     // 2. crawl from user XMP

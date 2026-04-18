@@ -3,47 +3,81 @@ const path = require('path')
 const fs = require('fs')
 const escapeHtml = require('escape-html')
 const yaml = require('js-yaml');
+const ComfyUIParser = require('./comfyui');
+
 class Parser {
   constructor() {
+    this.comfyParser = new ComfyUIParser();
   }
   async parse(filename) {
     let buf = await fs.promises.readFile(filename)
     let parsed = await exifr.parse(buf, true)
+    
+    // Handle case where exifr.parse returns undefined (corrupted or unsupported image)
+    if (!parsed) {
+      console.log(`Warning: Could not parse metadata from ${filename}`)
+      return this.convert({}, {})
+    }
+    
     let attrs = {}
     if (parsed.ImageWidth) attrs.width = parsed.ImageWidth
     if (parsed.ImageHeight) attrs.height = parsed.ImageHeight
 
     let app
     let meta
-    if (parsed["sd-metadata"]) {
-      app = "invokeai"
-    } else if (parsed.parameters) {
-      app = "automatic1111"
-    } else if (parsed.ImageDescription) {
-      app = "imaginairy"
-    } else if (parsed.description && parsed.description.value) {
-      app = "stablediffusion"
-      parsed.parameters = parsed.description.value.replace("&#xA;", "\n")
-    } else if (parsed.userComment) {
-      app = "stablediffusion"
-      let chars = parsed.userComment.filter((x) => {
-        return x
-      })
-      let str = Buffer.from(chars).toString()
-      str = str.replace(/^(UNICODE|ASCII)/, "")
-      parsed.parameters = str
-    } else if (parsed.Comment) {
-      app = "novelai"
-      attrs.prompt = parsed.Description
-    } else {
-      let SDKEYS = Object.keys(parsed).filter((x) => {
-        return x.startsWith("SD:")
-      })
-      if (SDKEYS.length > 0) {
-        app = "sygil"
-      } else {
+    
+    // Check for ComfyUI workflow first
+    if (parsed.prompt && typeof parsed.prompt === 'string') {
+      try {
+        // ComfyUI stores workflow as JSON string in 'prompt' field
+        const possibleWorkflow = JSON.parse(parsed.prompt);
+        if (possibleWorkflow && typeof possibleWorkflow === 'object') {
+          // Check if it looks like a ComfyUI workflow (has node structure)
+          const keys = Object.keys(possibleWorkflow);
+          if (keys.length > 0 && possibleWorkflow[keys[0]]?.class_type) {
+            app = "comfyui";
+            const comfyData = this.comfyParser.parse(possibleWorkflow);
+            if (comfyData) {
+              meta = { ...attrs, ...comfyData };
+            }
+          }
+        }
+      } catch (e) {
+        // Not JSON or not ComfyUI, continue with other parsers
+      }
+    }
+    
+    if (!app) {
+      if (parsed["sd-metadata"]) {
+        app = "invokeai"
+      } else if (parsed.parameters) {
+        app = "automatic1111"
+      } else if (parsed.ImageDescription) {
+        app = "imaginairy"
+      } else if (parsed.description && parsed.description.value) {
         app = "stablediffusion"
-        meta = parsed
+        parsed.parameters = parsed.description.value.replace("&#xA;", "\n")
+      } else if (parsed.userComment) {
+        app = "stablediffusion"
+        let chars = parsed.userComment.filter((x) => {
+          return x
+        })
+        let str = Buffer.from(chars).toString()
+        str = str.replace(/^(UNICODE|ASCII)/, "")
+        parsed.parameters = str
+      } else if (parsed.Comment) {
+        app = "novelai"
+        attrs.prompt = parsed.Description
+      } else {
+        let SDKEYS = Object.keys(parsed).filter((x) => {
+          return x.startsWith("SD:")
+        })
+        if (SDKEYS.length > 0) {
+          app = "sygil"
+        } else {
+          app = "stablediffusion"
+          meta = parsed
+        }
       }
     }
 
@@ -264,7 +298,12 @@ class Parser {
     } else if (e.Sampler) {
       x["xmp:sampler"] = e.Sampler
     } else if (e.sampler) {
-      x["xmp:sampler"] = e.sampler
+      // ComfyUI: combine sampler + scheduler if both exist
+      if (e.scheduler) {
+        x["xmp:sampler"] = `${e.sampler} ${e.scheduler}`
+      } else {
+        x["xmp:sampler"] = e.sampler
+      }
     } else if (e.sampler_name) {
       x["xmp:sampler"] = e.sampler_name
     } else if (e["sampler-type"]) {
@@ -289,6 +328,14 @@ class Parser {
 
     if (!x["xmp:prompt"]) {
       x["xmp:prompt"] = e.prompt
+    }
+
+    // Handle LoRAs (ComfyUI format: array of {name, strength})
+    if (e.loras && Array.isArray(e.loras) && e.loras.length > 0) {
+      // Store as comma-separated list of "name:strength"
+      x["xmp:loras"] = e.loras.map(lora => {
+        return lora.strength !== 1.0 ? `${lora.name}:${lora.strength}` : lora.name
+      }).join(", ")
     }
 
     if (options && options.model) {
@@ -390,6 +437,7 @@ class Parser {
       "xmp:controlnet_model",
       "xmp:controlnet_weight",
       "xmp:controlnet_guidance_strength",
+      "xmp:loras",
       "dc:subject",
     ]
 
@@ -490,19 +538,24 @@ class Parser {
       }
       return p
     } else if (parsed.ImageDescription) {
-      const [m, _prompt, width, height, kv] = /^"?(.*)"? ([0-9]+)x([0-9]+)px (negative-prompt:.+)$/.exec(parsed.ImageDescription)
-      const regex = /([\w-]+):("[^"]+"|[\w]+)/g;
-      const attrs = {};
-      let match;
-      while ((match = regex.exec(kv))) {
-        attrs[match[1]] = isNaN(match[2])
-          ? match[2].replace(/"/g, '')
-          : match[2]
+      const match = /^"?(.*)"? ([0-9]+)x([0-9]+)px (negative-prompt:.+)$/.exec(parsed.ImageDescription)
+      if (match) {
+        const [m, _prompt, width, height, kv] = match
+        const regex = /([\w-]+):("[^"]+"|[\w]+)/g;
+        const attrs = {};
+        let kvMatch;
+        while ((kvMatch = regex.exec(kv))) {
+          attrs[kvMatch[1]] = isNaN(kvMatch[2])
+            ? kvMatch[2].replace(/"/g, '')
+            : kvMatch[2]
+        }
+        attrs.prompt = _prompt;
+        attrs.width = width;
+        attrs.height = height;
+        return attrs
       }
-      attrs.prompt = _prompt;
-      attrs.width = width;
-      attrs.height = height;
-      return attrs
+      // If regex doesn't match, return null to fall through to other parsers
+      return null
     } else if (parsed["SD:width"]) {
       let cleaned = {}
       for(let key in parsed) {

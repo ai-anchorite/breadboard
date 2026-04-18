@@ -115,9 +115,9 @@ const card = (meta, stripPunctuation, recycle) => {
     </div>
     ${tagsRow}
     <div class='metadata-section'>
-      <div class='metadata-header'>
-        <button title='copy the prompt to clipboard' class='copy-text' data-value="${meta.prompt}"><i class='fa-regular fa-clone'></i> <span>Copy Prompt</span></button>
-        <button title='show/hide detailed metadata' class='toggle-metadata'><i class="fa-solid fa-chevron-down"></i> Show Details</button>
+      <div class='metadata-buttons'>
+        <button title='copy the prompt to clipboard' class='metadata-btn copy-prompt-btn' data-value="${meta.prompt}"><i class='fa-regular fa-clone'></i> Copy Prompt</button>
+        <button title='show/hide detailed metadata' class='metadata-btn toggle-metadata'><i class="fa-solid fa-chevron-down"></i> Show Details</button>
       </div>
       <div class='metadata-details hidden'>
         <table>${trs}</table>

@@ -77,7 +77,7 @@ class Handler {
       let colTarget = (e.target.classList.contains(".col") ? e.target : e.target.closest(".col"))
       let fullscreenTarget = (e.target.classList.contains(".gofullscreen") ? e.target : e.target.closest(".gofullscreen"))
       let popupTarget = (e.target.classList.contains(".popup") ? e.target : e.target.closest(".popup"))
-      let clipboardTarget = (e.target.classList.contains(".copy-text") ? e.target : e.target.closest(".copy-text"))
+      let clipboardTarget = (e.target.classList.contains(".copy-text") ? e.target : e.target.closest(".copy-text")) || (e.target.classList.contains(".copy-prompt-btn") ? e.target : e.target.closest(".copy-prompt-btn"))
       let tokenTarget = (e.target.classList.contains(".token") ? e.target : e.target.closest(".token"))
       let tokenPopupTarget = (e.target.classList.contains(".popup-link") ? e.target : e.target.closest(".popup-link"))
       let grabTarget = (e.target.classList.contains(".grab") ? e.target : e.target.closest(".grab"))
@@ -232,14 +232,26 @@ class Handler {
           clipboardTarget.querySelector("i").classList.remove("fa-clone")
           clipboardTarget.querySelector("i").classList.add("fa-solid")
           clipboardTarget.querySelector("i").classList.add("fa-check")
-          clipboardTarget.querySelector("span").innerHTML = "copied"
+          
+          // Update text (handle both span and direct text)
+          const textSpan = clipboardTarget.querySelector("span")
+          const originalText = clipboardTarget.textContent.trim()
+          if (textSpan) {
+            textSpan.innerHTML = "copied"
+          } else {
+            clipboardTarget.innerHTML = '<i class="fa-solid fa-check"></i> Copied'
+          }
 
           setTimeout(() => {
             clipboardTarget.querySelector("i").classList.remove("fa-solid")
             clipboardTarget.querySelector("i").classList.remove("fa-check")
             clipboardTarget.querySelector("i").classList.add("fa-regular")
             clipboardTarget.querySelector("i").classList.add("fa-clone")
-            clipboardTarget.querySelector("span").innerHTML = ""
+            if (textSpan) {
+              textSpan.innerHTML = ""
+            } else {
+              clipboardTarget.innerHTML = '<i class="fa-regular fa-clone"></i> Copy Prompt'
+            }
           }, 3000)
         }
       } else {

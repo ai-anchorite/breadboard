@@ -163,9 +163,31 @@ class DB {
   async init_db () {
     // upgrade from legacy db schema (breadboard => data + user)
     // 1. The "data" DB only contains attributes that can be crawled from the files
+    
+    // Check if we need to upgrade the schema by deleting old database
+    const dataExists = await Dexie.exists("data");
+    if (dataExists) {
+      // Try to open and check version
+      const tempDb = new Dexie("data");
+      try {
+        await tempDb.open();
+        const currentVersion = tempDb.verno;
+        tempDb.close();
+        
+        // If version is less than 2 or schema doesn't have loras, delete and recreate
+        if (currentVersion < 2) {
+          console.log("Upgrading database schema, deleting old data database...");
+          await Dexie.delete("data");
+        }
+      } catch (e) {
+        console.log("Error checking database version, will recreate:", e);
+        await Dexie.delete("data");
+      }
+    }
+    
     this.db = new Dexie("data")
     this.db.version(2).stores({
-      files: "file_path, agent, model_name, model_hash, root_path, prompt, btime, mtime, width, height, *tokens, seed, cfg_scale, steps, aesthetic_score, controlnet_module, controlnet_model, controlnet_weight, controlnet_guidance_strength, input_strength",
+      files: "file_path, agent, model_name, model_hash, root_path, prompt, btime, mtime, width, height, *tokens, seed, cfg_scale, steps, aesthetic_score, controlnet_module, controlnet_model, controlnet_weight, controlnet_guidance_strength, input_strength, loras",
     })
 
     // 2. The "user" DB contains attributes that can NOT be crawled from the files
