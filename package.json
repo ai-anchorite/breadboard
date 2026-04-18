@@ -13,6 +13,7 @@
   "build": {
     "appId": "net.candywrap.breadboard",
     "productName": "Breadboard",
+    "buildDependenciesFromSource": false,
     "extraResources": [
       "./script/**"
     ],
@@ -71,6 +72,7 @@
     "@ipld/dag-pb": "^2.1.18",
     "axios": "^1.15.0",
     "basic-auth": "^2.0.1",
+    "better-sqlite3": "^12.4.1",
     "braces": "^3.0.3",
     "chokidar": "^3.5.3",
     "cookie": "^0.7.2",

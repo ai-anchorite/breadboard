@@ -237,7 +237,10 @@ class BreadboardServer {
     
     app.use(express.static(path.resolve(__dirname, '../public')))
     app.get('/file', (req, res) => {
-      res.sendFile(req.query.file)
+      const filePath = req.query.file;
+      // Ensure absolute path
+      const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+      res.sendFile(absolutePath);
     })
     app.use(cookieParser());
     app.use((req, res, next) => {
@@ -368,6 +371,69 @@ class BreadboardServer {
         version: this.version,
         file_path: req.query.file
       })
+    })
+    
+    app.get('/video-viewer', (req, res) => {
+      let session = this.auth(req, res)
+      res.render("video-viewer", {
+        agent: req.agent,
+        theme: this.ipc[session].theme,
+        version: this.version,
+        fingerprint: req.query.fingerprint,
+        filename: req.query.filename || 'Video'
+      })
+    })
+    
+    app.get('/videos', (req, res) => {
+      let session = this.auth(req, res)
+      res.render("videos", {
+        agent: req.agent,
+        theme: this.ipc[session].theme,
+        platform: os.platform(),
+        style: this.ipc[session].style,
+        version: this.version,
+      })
+    })
+    
+    // Serve video files by fingerprint
+    app.get('/video/:fingerprint', (req, res) => {
+      if (!this.config.videoDb) {
+        return res.status(503).send('Video system not initialized');
+      }
+      
+      const video = this.config.videoDb.getVideo(req.params.fingerprint);
+      if (!video || !video.file_path) {
+        return res.status(404).send('Video not found');
+      }
+      
+      const filePath = video.file_path;
+      const stat = require('fs').statSync(filePath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+      
+      if (range) {
+        // Handle range requests for video streaming
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunksize = (end - start) + 1;
+        const file = require('fs').createReadStream(filePath, { start, end });
+        const head = {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': 'video/mp4',
+        };
+        res.writeHead(206, head);
+        file.pipe(res);
+      } else {
+        const head = {
+          'Content-Length': fileSize,
+          'Content-Type': 'video/mp4',
+        };
+        res.writeHead(200, head);
+        require('fs').createReadStream(filePath).pipe(res);
+      }
     })
     
     app.get('/screen', (req, res) => {
