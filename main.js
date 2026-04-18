@@ -4,6 +4,13 @@ const BreadboardServer = require('./server')
 const packagejson = require('./package.json')
 const is_mac = process.platform.startsWith("darwin")
 
+// Set userData to local appdata directory for portability
+const appDataPath = path.join(__dirname, '..', 'appdata')
+app.setPath('userData', appDataPath)
+app.setPath('sessionData', path.join(appDataPath, 'sessions'))
+app.setPath('cache', path.join(appDataPath, 'cache'))
+app.setPath('logs', path.join(appDataPath, 'logs'))
+
 // Initialize context menu after app is ready (ES module compatibility)
 let contextMenuInitialized = false;
 

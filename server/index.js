@@ -45,8 +45,9 @@ class BreadboardServer {
     this.default_sync_mode = "default"
     this.current_sorter_code = 0
 
-    const home = os.homedir()
-    this.home = path.resolve(home, "__breadboard__")
+    // Use local appdata directory instead of user home
+    const appRoot = path.resolve(__dirname, '..')
+    this.home = path.resolve(appRoot, 'appdata', 'breadboard')
 
     this.config.gm = {
       user: new GM({
@@ -176,10 +177,15 @@ class BreadboardServer {
   async settings() {
     let str = await fs.promises.readFile(this.config.config, "utf8")
     const attrs = yaml.load(str)
-    const home = os.homedir()
+    
+    // Use local appdata directory for folder path resolution
+    const appRoot = path.resolve(__dirname, '..')
+    const appDataHome = path.resolve(appRoot, 'appdata', 'breadboard')
+    
     const folders = attrs.folders.map((c) => {
-      let homeResolved = c.replace(/^~(?=$|\/|\\)/, home)
-      let relativeResolved = path.resolve(home, homeResolved)
+      // Replace ~ with appdata directory instead of user home
+      let homeResolved = c.replace(/^~(?=$|\/|\\)/, appDataHome)
+      let relativeResolved = path.resolve(appDataHome, homeResolved)
       return relativeResolved
     })
     attrs.folders = folders
