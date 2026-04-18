@@ -83,6 +83,7 @@ class Handler {
       let grabTarget = (e.target.classList.contains(".grab") ? e.target : e.target.closest(".grab"))
       let openFileTarget = (e.target.classList.contains(".open-file") ? e.target : e.target.closest(".open-file"))
       let favoriteFileTarget = (e.target.classList.contains(".favorite-file") ? e.target : e.target.closest(".favorite-file"))
+      let clearTagsTarget = (e.target.classList.contains(".clear-tags-btn") ? e.target : e.target.closest(".clear-tags-btn"))
       let card = (e.target.classList.contains("card") ? e.target : e.target.closest(".card"))
       if (card) card.classList.remove("fullscreen")
       if (fullscreenTarget) {
@@ -135,15 +136,62 @@ class Handler {
           })
         }
 
-        // Synchronize to refresh the card with updated metadata
+        // Update UI in-place without refresh
+        const newFavorited = !is_favorited
+        favoriteFileTarget.setAttribute("data-favorited", newFavorited)
+        const icon = favoriteFileTarget.querySelector("i")
+        if (newFavorited) {
+          icon.classList.remove("fa-regular")
+          icon.classList.add("fa-solid")
+        } else {
+          icon.classList.remove("fa-solid")
+          icon.classList.add("fa-regular")
+        }
+        
+        // Update the database in background
         await this.app.synchronize([{ file_path: src, root_path: root }], async () => {
-          document.querySelector(".status").innerHTML = ""
-          let query = document.querySelector(".search").value
-          if (query && query.length > 0) {
-            await this.app.search(query)
-          } else {
-            await this.app.search()
-          }
+          // Silent update - no UI refresh
+        })
+      } else if (clearTagsTarget) {
+        const src = clearTagsTarget.getAttribute("data-src")
+        const root = clearTagsTarget.getAttribute("data-root")
+        const card = clearTagsTarget.closest(".card")
+        
+        // Confirm before clearing
+        if (!confirm("Clear all tags from this image?")) {
+          return
+        }
+        
+        // Clear all tags via API
+        await this.api.gm({
+          path: "user",
+          cmd: "set",
+          args: [
+            src,
+            {
+              "dc:subject": []
+            }
+          ]
+        })
+        
+        // Update UI in-place - remove tags row
+        const tagsRow = card.querySelector(".tags-row")
+        if (tagsRow) {
+          tagsRow.remove()
+        }
+        
+        // Update favorite button if it was favorited
+        const favoriteBtn = card.querySelector(".favorite-file")
+        if (favoriteBtn && favoriteBtn.getAttribute("data-favorited") === "true") {
+          favoriteBtn.setAttribute("data-favorited", "false")
+          const icon = favoriteBtn.querySelector("i")
+          icon.classList.remove("fa-solid")
+          icon.classList.add("fa-regular")
+        }
+        
+        // Update database in background
+        await this.app.synchronize([{ file_path: src, root_path: root }], async () => {
+          // Silent update - no UI refresh
         })
       } else if (grabTarget) {
       } else if (tokenTarget && e.target.closest(".card.expanded")) {
@@ -324,6 +372,59 @@ class Handler {
 
           }
         }
+      }
+    })
+    
+    // Tag input handler - inline tagging without navigation
+    document.querySelector(".container").addEventListener("keydown", async (e) => {
+      if (e.target.classList.contains("tag-input") && e.key === "Enter") {
+        e.preventDefault()
+        e.stopPropagation()
+        
+        const input = e.target
+        const tagValue = input.value.trim()
+        
+        if (!tagValue) return
+        
+        const src = input.getAttribute("data-src")
+        const root = input.getAttribute("data-root")
+        const card = input.closest(".card")
+        
+        // Add tag via API
+        await this.api.gm({
+          path: "user",
+          cmd: "set",
+          args: [
+            src,
+            {
+              "dc:subject": [{
+                val: tagValue,
+                mode: "merge"
+              }]
+            }
+          ]
+        })
+        
+        // Update UI in-place
+        let tagsRow = card.querySelector(".tags-row")
+        if (!tagsRow) {
+          tagsRow = document.createElement("div")
+          tagsRow.className = "tags-row"
+          input.parentNode.parentNode.insertBefore(tagsRow, input.parentNode)
+        }
+        
+        const tagSpan = document.createElement("span")
+        tagSpan.setAttribute("data-tag", `tag:${tagValue}`)
+        tagSpan.innerHTML = `<button data-value="tag:${tagValue}" class='token tag-item'><i class="fa-solid fa-tag"></i> ${tagValue}</button>`
+        tagsRow.appendChild(tagSpan)
+        
+        // Clear input
+        input.value = ""
+        
+        // Update database in background
+        await this.app.synchronize([{ file_path: src, root_path: root }], async () => {
+          // Silent update - no UI refresh
+        })
       }
     })
   }

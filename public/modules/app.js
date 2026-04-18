@@ -426,14 +426,13 @@ class App {
     let aspect_ratio = await this.user.settings.where({ key: "aspect_ratio" }).first()
     let fit = await this.user.settings.where({ key: "fit" }).first()
     let expanded_width = await this.user.settings.where({ key: "expanded_width" }).first()
-    let image_width = await this.user.settings.where({ key: "image_width" }).first()
     let slideshow_interval = await this.user.settings.where({ key: "slideshow_interval" }).first()
     let recycle = await this.user.settings.where({ key: "recycle" }).first()
     this.style = {
       aspect_ratio: (aspect_ratio ? aspect_ratio.val : 100),
       fit: (fit ? fit.val : "contain"),
       expanded_width: (expanded_width ? expanded_width.val : 33),
-      image_width: (image_width ? image_width.val : 50),
+      image_width: 100,  // Always 100% - locked
       slideshow_interval: (slideshow_interval ? slideshow_interval.val : 3000),
       recycle: (recycle ? recycle.val : true)
     }

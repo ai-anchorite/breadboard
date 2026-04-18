@@ -62,6 +62,7 @@ const breadboard = new BreadboardServer();
 
 // Disable disk cache to avoid cache errors
 app.commandLine.appendSwitch('disable-http-cache');
+app.commandLine.appendSwitch('disk-cache-size', '1');
 
 app.whenReady().then(async () => {
   // Initialize context menu with dynamic import for ES module compatibility

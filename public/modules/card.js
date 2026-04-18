@@ -106,22 +106,24 @@ const card = (meta, stripPunctuation, recycle) => {
 <button title='image viewer' class='gofullscreen'><i class="fa-solid fa-eye"></i></button>
 <button title='pop out image viewer' class='popup' data-src="/viewer?file=${encodeURIComponent(meta.file_path)}"><i class="fa-solid fa-up-right-from-square"></i></button>
 </div>
-<div class='row'>
-  <img loading='${recycle ? "eager" : "lazy"}' data-root="${meta.root_path}" data-src="${meta.file_path}" src="/file?file=${encodeURIComponent(meta.file_path)}">
-  <div class='col'>
-    <h4>${meta.prompt ? meta.prompt : ""}</h4>
-    <div>
-      <div class='more hidden'><i class="fa-solid fa-angles-down"></i> view more</div>
+<img loading='${recycle ? "eager" : "lazy"}' data-root="${meta.root_path}" data-src="${meta.file_path}" src="/file?file=${encodeURIComponent(meta.file_path)}">
+<div class='col'>
+  <h4>${meta.prompt ? meta.prompt : ""}</h4>
+  <div>
+    <div class='more hidden'><i class="fa-solid fa-angles-down"></i> view more</div>
+  </div>
+  ${tagsRow}
+  <div class='tag-input-section'>
+    <input type='text' class='tag-input' placeholder='Add tag...' data-src="${meta.file_path}" data-root="${meta.root_path}">
+    <button class='clear-tags-btn' title='Clear all tags' data-src="${meta.file_path}" data-root="${meta.root_path}"><i class="fa-solid fa-xmark"></i> Clear Tags</button>
+  </div>
+  <div class='metadata-section'>
+    <div class='metadata-buttons'>
+      <button title='copy the prompt to clipboard' class='metadata-btn copy-prompt-btn' data-value="${meta.prompt}"><i class='fa-regular fa-clone'></i> Copy Prompt</button>
+      <button title='show/hide detailed metadata' class='metadata-btn toggle-metadata'><i class="fa-solid fa-chevron-down"></i> Show Details</button>
     </div>
-    ${tagsRow}
-    <div class='metadata-section'>
-      <div class='metadata-buttons'>
-        <button title='copy the prompt to clipboard' class='metadata-btn copy-prompt-btn' data-value="${meta.prompt}"><i class='fa-regular fa-clone'></i> Copy Prompt</button>
-        <button title='show/hide detailed metadata' class='metadata-btn toggle-metadata'><i class="fa-solid fa-chevron-down"></i> Show Details</button>
-      </div>
-      <div class='metadata-details hidden'>
-        <table>${trs}</table>
-      </div>
+    <div class='metadata-details hidden'>
+      <table>${trs}</table>
     </div>
   </div>
 </div>`

@@ -128,7 +128,11 @@ class BreadboardServer {
       })
       
       this.watcher.on("add", async (filename) => {
-        if (filename.endsWith(".png")) {
+        // Support multiple image formats
+        const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
+        const hasImageExtension = imageExtensions.some(ext => filename.toLowerCase().endsWith(ext));
+        
+        if (hasImageExtension) {
           let res
           let last_mtime
 

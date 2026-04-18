@@ -401,14 +401,8 @@ class Navbar {
       <input id='expanded-width' type='range' min="10" max="100" value="${this.app.style.expanded_width}" step="1">
     </div>
   </div>
-  <br>
-  <div class='row'>
-    <div>image_width : card_width => ${this.app.style.image_width}%</div>
-    <div class='flex'>
-      <input id='image-width' type='range' min="0" max="100" value="${this.app.style.image_width}" step="1">
-    </div>
-  </div>
-  <br>
+  <hr>
+  <h3><i class="fa-solid fa-play"></i> Slideshow</h3>
   <div class='row'>
     <div>slideshow interval => ${this.app.style.slideshow_interval / 1000}s</div>
     <div class='flex'>
@@ -469,14 +463,6 @@ class Navbar {
           let aspect_ratio = parseInt(e.target.value)
           e.target.closest(".row").querySelector("div").innerHTML = "card_width : browser_width => " + e.target.value + "%"
           await this.app.user.settings.put({ key: "expanded_width", val: aspect_ratio })
-          await this.app.init_style()
-        })
-        document.querySelector("#image-width").addEventListener("input", async (e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          let aspect_ratio = parseInt(e.target.value)
-          e.target.closest(".row").querySelector("div").innerHTML = "image_width : card_width => " + e.target.value + "%"
-          await this.app.user.settings.put({ key: "image_width", val: aspect_ratio })
           await this.app.init_style()
         })
         document.querySelector("#slideshow-interval").addEventListener("input", async (e) => {

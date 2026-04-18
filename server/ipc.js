@@ -68,8 +68,7 @@ class IPC {
       this.app.watch(folderpaths)
       this.globs = new Set()
       for(let folder of folderpaths) {
-        const glob = `${folder.replaceAll("\\", "/")}/**/*.png`
-        //const glob = `${folder.replaceAll("\\", "/")}/**/*.{jpg,jpeg,png,webp}`
+        const glob = `${folder.replaceAll("\\", "/")}/**/*.{png,jpg,jpeg,webp,gif,bmp,tiff,tif}`
         this.globs.add(glob)
       }
     })
@@ -115,8 +114,7 @@ class IPC {
         }
       } else if (rpc.root_path) {
         let filenames = await new fdir()
-          .glob("**/*.png")
-          //.glob("**/*.{jpg,jpeg,png,webp}")
+          .glob("**/*.{png,jpg,jpeg,webp,gif,bmp,tiff,tif}")
           .withBasePath()
           .crawl(rpc.root_path)
           .withPromise()

@@ -277,6 +277,21 @@ nav input {
   user-select: none;
   position: relative;
 }
+/* Expanded card layout: image on top, content below */
+.card.expanded {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.card.expanded > img {
+  width: 100%;
+  max-width: var(--image-width);
+}
+.card.expanded > .col {
+  width: 100%;
+  max-width: var(--image-width);
+  display: block !important;
+}
 .card .xmp {
   display: none;
 }
@@ -554,9 +569,6 @@ body.dark .card .metadata-details {
   object-position: center;
   height: calc(var(--card-aspect-ratio)/100*var(--card-width));
 }
-.card.expanded img {
-  max-width: var(--image-width);
-}
 .card img {
   width: auto;
   box-sizing: border-box;
@@ -567,7 +579,74 @@ body.dark .card .metadata-details {
 .card .col {
   padding: 10px;
   box-sizing: border-box;
+}
+/* Tag input styling */
+.card .tag-input-section {
+  margin: 10px 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.card:not(.expanded) .tag-input-section {
+  display: none;
+}
+.card .tag-input {
   flex-grow: 1;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  border-radius: 15px;
+  box-sizing: border-box;
+  outline: none;
+}
+.card .clear-tags-btn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  border-radius: 15px;
+  cursor: pointer;
+  font-weight: bold;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+body.default .card .tag-input {
+  border: 1px solid rgba(0,0,0,0.2);
+  background: rgba(0,0,0,0.02);
+  color: #111;
+}
+body.default .card .tag-input:focus {
+  border-color: royalblue;
+  background: white;
+}
+body.default .card .clear-tags-btn {
+  border: 1px solid rgba(0,0,0,0.2);
+  background: rgba(0,0,0,0.02);
+  color: #111;
+}
+body.default .card .clear-tags-btn:hover {
+  background: rgba(255,0,0,0.1);
+  border-color: #F22E2E;
+  color: #F22E2E;
+}
+body.dark .card .tag-input {
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.05);
+  color: white;
+}
+body.dark .card .tag-input:focus {
+  border-color: cornflowerblue;
+  background: rgba(255,255,255,0.08);
+}
+body.dark .card .clear-tags-btn {
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.05);
+  color: white;
+}
+body.dark .card .clear-tags-btn:hover {
+  background: rgba(255,0,0,0.1);
+  border-color: #F22E2E;
+  color: #F22E2E;
 }
 .card pre {
   overflow-wrap: break-word;
@@ -1358,8 +1437,9 @@ popup
 .pop .card .col {
   padding: 20px;
 }
-.pop .card .row {
-  display: block;
+.pop .card.expanded {
+  display: flex;
+  flex-direction: column;
 }
 .pop .card.expanded img {
   width: 100%
@@ -1412,12 +1492,10 @@ nav button {
 @media screen and (max-width: 768px) {
   .card.expanded {
     max-width: 100%;
+    flex-direction: column;
   }
   .card.expanded .col {
     padding: 20px;
-  }
-  .card.expanded .row {
-    display: block;
   }
   .card.expanded img {
     width: 100%;
