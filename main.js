@@ -9,6 +9,9 @@ const VideoDatabase = require('./server/video-database')
 const VideoScanner = require('./server/video-scanner')
 const VideoWatcher = require('./server/video-watcher')
 
+// Image system imports
+const ImageDatabase = require('./server/image-database')
+
 // Set userData to local appdata directory for portability
 const appDataPath = path.join(__dirname, '..', 'appdata')
 app.setPath('userData', appDataPath)
@@ -30,6 +33,19 @@ function initVideoSystem() {
     console.log('Video system initialized')
   } catch (error) {
     console.error('Failed to initialize video system:', error)
+  }
+}
+
+// Initialize image system
+const imageDbPath = path.join(appDataPath, 'breadboard', 'images.db')
+let imageDb = null
+
+function initImageSystem() {
+  try {
+    imageDb = new ImageDatabase(imageDbPath)
+    console.log('Image system initialized')
+  } catch (error) {
+    console.error('Failed to initialize image system:', error)
   }
 }
 
@@ -101,12 +117,16 @@ app.whenReady().then(async () => {
   // Initialize video system
   initVideoSystem()
 
+  // Initialize image system
+  initImageSystem()
+
   await breadboard.init({
     theme,
     config: path.resolve(__dirname, "breadboard.yaml"),
     socket: new Socket(),
     version: packagejson.version,
     videoDb: videoDb,  // Pass video database to server
+    imageDb: imageDb,  // Pass image database to server
     onconnect: (session) => {
       // Request handlers for api.js
       breadboard.ipc[session].handle("theme", (_session, _theme) => {
