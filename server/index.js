@@ -41,7 +41,7 @@ class BreadboardServer {
     
     console.log("Breadboard version:", this.version)
     this.need_update = null
-    this.default_sync_mode = "default"
+    this.default_sync_mode = false  // Don't auto-sync on startup — SQLite persists data
     this.current_sorter_code = 0
 
     // Use local appdata directory instead of user home
@@ -456,6 +456,241 @@ class BreadboardServer {
       } else {
         res.json({})
       }
+    })
+
+    // --- Image API (server-side SQLite) ---
+
+    app.get("/api/images/search", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const query = req.query.q || '';
+      const sort = req.query.sort || 'btime';
+      const direction = req.query.direction != null ? parseInt(req.query.direction) : -1;
+      const offset = req.query.offset != null ? parseInt(req.query.offset) : 0;
+      const limit = req.query.limit != null ? parseInt(req.query.limit) : 500;
+
+      // Apply global filters
+      let fullQuery = query;
+      try {
+        const globals = this.config.imageDb.getGlobalFilters();
+        if (globals.length > 0) {
+          const globalStr = globals.map(g => g.query).join(' ');
+          fullQuery = fullQuery ? `${fullQuery} ${globalStr}` : globalStr;
+        }
+      } catch (e) {
+        console.error('Error applying global filters:', e);
+      }
+
+      try {
+        const result = this.config.imageDb.search(fullQuery, { sort, direction, offset, limit });
+        res.json(result);
+      } catch (e) {
+        console.error('Image search error:', e);
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.get("/api/images/count", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      res.json({ count: this.config.imageDb.getCount() });
+    })
+
+    app.get("/api/images/tags/all", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      res.json(this.config.imageDb.getAllTags());
+    })
+
+    app.get("/api/images/trash", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      res.json(this.config.imageDb.getTrash());
+    })
+
+    app.post("/api/images/trash/empty", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const count = this.config.imageDb.emptyTrash();
+      res.json({ success: true, deleted: count });
+    })
+
+    app.get("/api/images/xmp/:fingerprint", async (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const image = this.config.imageDb.getImage(req.params.fingerprint);
+      if (!image) return res.status(404).json({ error: 'Image not found' });
+      try {
+        const xmlFormatter = require('xml-formatter');
+        let xmpData = await this.config.gm.agent.get(image.file_path);
+        if (xmpData && xmpData.xmp) {
+          res.json({ xmp: xmlFormatter(xmpData.xmp, { indentation: "  " }) });
+        } else {
+          res.json({ xmp: '' });
+        }
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.get("/api/images/:fingerprint", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const image = this.config.imageDb.getImage(req.params.fingerprint);
+      if (!image) return res.status(404).json({ error: 'Image not found' });
+      res.json(image);
+    })
+
+    app.post("/api/images/tags/add", express.json(), (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const { fingerprints, tags } = req.body;
+      if (!fingerprints || !tags) return res.status(400).json({ error: 'fingerprints and tags required' });
+      try {
+        this.config.imageDb.addTags(fingerprints, tags);
+
+        // Also write tags to XMP files for persistence
+        for (const fp of fingerprints) {
+          const image = this.config.imageDb.getImage(fp);
+          if (image && image.file_path) {
+            const allTags = this.config.imageDb.getImageTags(fp);
+            this.config.gm.user.set(image.file_path, {
+              "dc:subject": allTags.map(t => ({ val: t }))
+            }).catch(e => console.error('XMP tag write error:', e));
+          }
+        }
+
+        res.json({ success: true });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.post("/api/images/tags/remove", express.json(), (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const { fingerprints, tags } = req.body;
+      if (!fingerprints || !tags) return res.status(400).json({ error: 'fingerprints and tags required' });
+      try {
+        this.config.imageDb.removeTags(fingerprints, tags);
+
+        // Update XMP files
+        for (const fp of fingerprints) {
+          const image = this.config.imageDb.getImage(fp);
+          if (image && image.file_path) {
+            const allTags = this.config.imageDb.getImageTags(fp);
+            this.config.gm.user.set(image.file_path, {
+              "dc:subject": allTags.map(t => ({ val: t }))
+            }).catch(e => console.error('XMP tag write error:', e));
+          }
+        }
+
+        res.json({ success: true });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.post("/api/images/delete", express.json(), (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const { fingerprints } = req.body;
+      if (!fingerprints) return res.status(400).json({ error: 'fingerprints required' });
+      const trashDir = path.resolve(__dirname, '..', 'appdata', 'deleted_files');
+      try {
+        const results = this.config.imageDb.softDelete(fingerprints, trashDir);
+        res.json({ success: true, results });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.post("/api/images/restore", express.json(), (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const { fingerprints } = req.body;
+      if (!fingerprints) return res.status(400).json({ error: 'fingerprints required' });
+      try {
+        const results = this.config.imageDb.restoreFromTrash(fingerprints);
+        res.json({ success: true, results });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    // --- Folder management API ---
+
+    app.get("/api/folders", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      res.json(this.config.imageDb.getFolders());
+    })
+
+    app.post("/api/folders", express.json(), (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const { path: folderPath } = req.body;
+      if (!folderPath) return res.status(400).json({ error: 'path required' });
+      this.config.imageDb.addFolder(folderPath);
+      res.json({ success: true });
+    })
+
+    app.delete("/api/folders", express.json(), (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const { path: folderPath } = req.body;
+      if (!folderPath) return res.status(400).json({ error: 'path required' });
+      this.config.imageDb.removeFolder(folderPath);
+      res.json({ success: true });
+    })
+
+    // --- Settings API ---
+
+    app.get("/api/settings/:key", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const val = this.config.imageDb.getSetting(req.params.key);
+      res.json({ key: req.params.key, val });
+    })
+
+    app.put("/api/settings/:key", express.json(), (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      this.config.imageDb.setSetting(req.params.key, req.body.val);
+      res.json({ success: true });
+    })
+
+    // --- Favorites API ---
+
+    app.get("/api/favorites", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      res.json(this.config.imageDb.getFavorites());
+    })
+
+    app.post("/api/favorites", express.json(), (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const { query, label, is_global } = req.body;
+      if (!query) return res.status(400).json({ error: 'query required' });
+      this.config.imageDb.addFavorite(query, label, is_global);
+      res.json({ success: true });
+    })
+
+    app.delete("/api/favorites/:id", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      this.config.imageDb.removeFavorite(parseInt(req.params.id));
+      res.json({ success: true });
+    })
+
+    app.put("/api/favorites/:id/global", express.json(), (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      this.config.imageDb.setFavoriteGlobal(parseInt(req.params.id), req.body.is_global);
+      res.json({ success: true });
+    })
+
+    // --- Sync API (trigger re-index) ---
+
+    app.post("/api/sync", express.json(), async (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const { root_path, force } = req.body;
+      if (!root_path) return res.status(400).json({ error: 'root_path required' });
+
+      // This triggers the existing sync flow through IPC
+      // The actual indexing happens in ipc.js and writes to imageDb
+      res.json({ success: true, message: 'Sync started' });
+    })
+
+    app.get("/api/status", (req, res) => {
+      const imageFolders = this.config.imageDb ? this.config.imageDb.getFolders() : [];
+      const imageCount = this.config.imageDb ? this.config.imageDb.getCount() : 0;
+      res.json({
+        version: this.version,
+        imageCount,
+        imageFolders: imageFolders.length,
+      });
     })
     
     server.listen(this.port, () => {

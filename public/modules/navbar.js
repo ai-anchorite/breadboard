@@ -71,13 +71,14 @@ class Navbar {
     document.querySelector("#favorite").addEventListener("click", async (e) => {
       let query = document.querySelector(".search").value
       if (query && query.length > 0) {
-        let exists = await this.app.user.favorites.get({ query })
+        let favorites = await this.app.api.getFavorites()
+        let exists = favorites.find(f => f.query === query)
         let favorited;
         if (exists) {
-          await this.app.user.favorites.where({ query }).delete()
+          await this.app.api.removeFavorite(exists.id)
           favorited = false
         } else {
-          await this.app.user.favorites.put({ query, global: 0 })
+          await this.app.api.addFavorite(query, null, false)
           favorited = true
         }
         if (favorited) {
@@ -441,7 +442,7 @@ class Navbar {
           e.preventDefault()
           e.stopPropagation()
           let zoom = parseInt(e.target.value)
-          await this.app.user.settings.put({ key: "zoom", val: e.target.value })
+          await this.app.api.setSetting('zoom', e.target.value)
           e.target.closest(".row").querySelector("div").innerHTML = "zoom " + e.target.value + "%"
           this.app.zoom = parseInt(e.target.value)
           this.app.zoomer.resized()
@@ -451,44 +452,41 @@ class Navbar {
           e.stopPropagation()
           let aspect_ratio = parseInt(e.target.value)
           e.target.closest(".row").querySelector("div").innerHTML = "height : width => " + e.target.value + "%"
-          await this.app.user.settings.put({ key: "aspect_ratio", val: aspect_ratio })
+          await this.app.api.setSetting('aspect_ratio', aspect_ratio)
           await this.app.init_style()
-          if (this.app.clusterize) {
-            this.app.clusterize.refresh(true)
-          }
         })
         document.querySelector("#expanded-width").addEventListener("input", async (e) => {
           e.preventDefault()
           e.stopPropagation()
           let aspect_ratio = parseInt(e.target.value)
           e.target.closest(".row").querySelector("div").innerHTML = "card_width : browser_width => " + e.target.value + "%"
-          await this.app.user.settings.put({ key: "expanded_width", val: aspect_ratio })
+          await this.app.api.setSetting('expanded_width', aspect_ratio)
           await this.app.init_style()
         })
         document.querySelector("#slideshow-interval").addEventListener("input", async (e) => {
           e.preventDefault()
           e.stopPropagation()
-          let interval = parseFloat(e.target.value) * 1000  // Convert seconds to milliseconds
+          let interval = parseFloat(e.target.value) * 1000
           e.target.closest(".row").querySelector("div").innerHTML = "slideshow interval => " + e.target.value + "s"
-          await this.app.user.settings.put({ key: "slideshow_interval", val: interval })
+          await this.app.api.setSetting('slideshow_interval', interval)
           await this.app.init_style()
         })
         document.querySelectorAll(".fit-selector input[type=radio]").forEach((el) => {
           el.addEventListener("change", async (e) => {
-            await this.app.user.settings.put({ key: "fit", val: e.target.value })
+            await this.app.api.setSetting('fit', e.target.value)
             await this.app.init_style()
           })
         })
         document.querySelectorAll(".minimal-selector input[type=radio]").forEach((el) => {
           el.addEventListener("change", async (e) => {
-            await this.app.user.settings.put({ key: "minimal", val: e.target.value })
+            await this.app.api.setSetting('minimal', e.target.value)
             await this.app.init_theme()
           })
         })
         document.querySelectorAll(".recycle-check input[type=radio]").forEach((el) => {
           el.addEventListener("change", async (e) => {
             let recycle = (e.target.value === "recycle")
-            await this.app.user.settings.put({ key: "recycle", val: recycle })
+            await this.app.api.setSetting('recycle', recycle)
             await this.app.init_style()
             location.href = location.href
           })

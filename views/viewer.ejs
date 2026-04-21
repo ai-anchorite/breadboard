@@ -5,132 +5,86 @@
     <title>Image Viewer</title>
     <link href="./viewer.css" rel="stylesheet" />
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-      html, body {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-      }
-      body {
-        background: #000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      body.default {
-        background: #fff;
-      }
-      #viewer-container {
-        display: none;
-      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; }
+      body { background: #000; display: flex; align-items: center; justify-content: center; }
+      body.default { background: #fff; }
+      #viewer-container { display: none; }
     </style>
   </head>
   <body>
     <div id="viewer-container"></div>
-    <script src="./dexie.js"></script>
+    <script src="./socket.io.js"></script>
     <script src="./viewer.js"></script>
+    <script src="./modules/api.js"></script>
     <script>
       let viewer;
-      
-      (async () => {
-        // Initialize database
-        const db = new Dexie("data");
-        db.version(2).stores({
-          files: "file_path, agent, model_name, model_hash, root_path, prompt, btime, mtime, width, height, *tokens, seed, cfg_scale, steps, aesthetic_score, controlnet_module, controlnet_model, controlnet_weight, controlnet_guidance_strength, input_strength",
-        });
-        
-        const userDb = new Dexie("user");
-        userDb.version(1).stores({
-          folders: "&name",
-          checkpoints: "&root_path, btime",
-          settings: "key, val",
-          favorites: "query, global"
-        });
-        
+
+      ;(async () => {
+        const api = new API({ agent: "<%=agent%>" })
+
         // Get slideshow interval setting
-        let slideshowSetting = await userDb.settings.where({ key: "slideshow_interval" }).first();
-        const slideshowInterval = slideshowSetting ? slideshowSetting.val : 3000;
-        
-        // Get the current file path from URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const currentFile = urlParams.get('file');
-        
-        // Get all images sorted by mtime (most recent first)
-        const images = await db.files.orderBy('mtime').reverse().toArray();
-        
+        let slideshowRes = await api.getSetting('slideshow_interval')
+        const slideshowInterval = slideshowRes.val ? parseInt(slideshowRes.val) : 3000
+
+        // Get the current file path and optional query from URL
+        const urlParams = new URLSearchParams(window.location.search)
+        const currentFile = urlParams.get('file')
+        const query = urlParams.get('query') || ''
+
+        // Get images via API (same query as the gallery view, or all if no query)
+        const result = await api.searchImages(query, { sort: 'btime', direction: -1, limit: 5000, offset: 0 })
+        const images = result.results || []
+
         if (images.length === 0) {
-          document.body.innerHTML = '<div style="color: white; text-align: center;">No images found</div>';
-          return;
+          document.body.innerHTML = '<div style="color: white; text-align: center; padding: 20px;">No images found</div>'
+          return
         }
-        
+
         // Find the index of the current image
-        const currentIndex = images.findIndex(img => img.file_path === currentFile);
-        
+        const currentIndex = images.findIndex(img => img.file_path === currentFile)
+
         // Create image elements for the viewer
-        const container = document.getElementById('viewer-container');
+        const container = document.getElementById('viewer-container')
         images.forEach(img => {
-          const imgEl = document.createElement('img');
-          imgEl.src = `/file?file=${encodeURIComponent(img.file_path)}`;
-          imgEl.alt = img.prompt || '';
-          container.appendChild(imgEl);
-        });
-        
-        // Initialize Viewer.js with all images
-        let zoomRatio = null;
-        
+          const imgEl = document.createElement('img')
+          imgEl.src = `/file?file=${encodeURIComponent(img.file_path)}`
+          imgEl.alt = img.prompt || ''
+          container.appendChild(imgEl)
+        })
+
+        // Initialize Viewer.js
         viewer = new Viewer(container, {
           inline: false,
           initialViewIndex: currentIndex >= 0 ? currentIndex : 0,
           transition: false,
-          interval: slideshowInterval,  // Use setting from database
+          interval: slideshowInterval,
           toolbar: {
-            'zoomIn': true,
-            'zoomOut': true,
-            'reset': true,
-            'prev': true,
-            'play': true,
-            'next': true,
-            'oneToOne': true,
-            'rotateLeft': true,
-            'rotateRight': true,
-            'flipHorizontal': true,
-            'flipVertical': true
-          },
-          zoomed(e) {
-            zoomRatio = e.detail.ratio;
+            'zoomIn': true, 'zoomOut': true, 'reset': true,
+            'prev': true, 'play': true, 'next': true,
+            'oneToOne': true, 'rotateLeft': true, 'rotateRight': true,
+            'flipHorizontal': true, 'flipVertical': true
           },
           viewed(e) {
-            // Reset zoom ratio when viewing a new image so it auto-fits
-            zoomRatio = null;
-            
-            const img = viewer.image;
+            const img = viewer.image
             if (img && img.naturalWidth && img.naturalHeight) {
-              // Account for toolbar (50px) and navbar (50px) in height calculation
-              const availableHeight = window.innerHeight - 100;
+              const availableHeight = window.innerHeight - 100
               const scaleFactor = Math.min(
-                window.innerWidth / img.naturalWidth, 
+                window.innerWidth / img.naturalWidth,
                 availableHeight / img.naturalHeight
-              );
-              viewer.zoomTo(scaleFactor);
+              )
+              viewer.zoomTo(scaleFactor)
             }
           },
-          hidden() {
-            // Close window when viewer is hidden
-            window.close();
-          },
+          hidden() { window.close() },
           title: false,
           navbar: true,
           keyboard: true,
           backdrop: true
-        });
-        
-        // Show the viewer immediately
-        viewer.show();
-      })();
+        })
+
+        viewer.show()
+      })()
     </script>
   </body>
 </html>

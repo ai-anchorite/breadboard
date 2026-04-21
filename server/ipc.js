@@ -23,6 +23,15 @@ class IPC {
         }
       }
       if (matched) {
+        // Index into SQLite image database for live updates
+        if (this.imageDb && msg.file_path && msg.root_path) {
+          try {
+            let stat = await fs.promises.stat(msg.file_path)
+            await this.imageDb.indexImage(msg.file_path, msg.root_path, msg, stat)
+          } catch (e) {
+            console.log("SQLite live index error:", e.message)
+          }
+        }
         await this.queue.push({
           method: "new",
           params: [msg]
@@ -34,6 +43,7 @@ class IPC {
     this.session = session
     this.globs = new Set()
     this.app = app
+    this.imageDb = config.imageDb || null
     if (config) {
       if (config.ipc) {
         this.ipc = config.ipc
@@ -98,6 +108,15 @@ class IPC {
             console.log("E", e)
           }
           if (res) {
+            // Index into SQLite image database
+            if (this.imageDb) {
+              try {
+                let stat = await fs.promises.stat(file_path)
+                await this.imageDb.indexImage(file_path, root_path, res, stat)
+              } catch (e) {
+                console.log("SQLite index error:", e.message)
+              }
+            }
             await this.queue.push({
               app: root_path,
               total: rpc.paths.length,
@@ -134,6 +153,14 @@ class IPC {
               let res = await crawler.sync(filename, rpc.force)
               if (res) {
                 if (!res.btime) res.btime = res.mtime
+                // Index into SQLite image database
+                if (this.imageDb) {
+                  try {
+                    await this.imageDb.indexImage(filename, rpc.root_path, res, stat)
+                  } catch (e) {
+                    console.log("SQLite index error:", e.message)
+                  }
+                }
                 await this.queue.push({
                   app: rpc.root_path,
                   total: filenames.length,
