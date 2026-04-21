@@ -83,9 +83,8 @@ Electron Main Process (app/main.js)
 
 Renderer Process (Electron BrowserWindow → Express routes)
   ├── Image gallery: app/views/index.ejs + app/public/modules/
-  │     ├── app.js       — main controller, DB init, sync orchestration
-  │     ├── api.js       — HTTP + Socket.IO communication
-  │     ├── db.js        — IndexedDB init (Dexie)
+  │     ├── app.js       — main controller, sync orchestration, draw loop
+  │     ├── api.js       — REST API + Socket.IO communication
   │     ├── navbar.js    — search bar, sort, filters, favorites
   │     ├── handler.js   — click handlers, card expand/collapse
   │     ├── card.js      — card HTML template
@@ -97,25 +96,30 @@ Renderer Process (Electron BrowserWindow → Express routes)
 
 ### Data stores
 
-**Image library — SQLite via better-sqlite3 (target state)**
-See §6 for the migration decision and rationale. The current state uses IndexedDB/Dexie.
+**Image library — SQLite via better-sqlite3 (implemented)**
+
+All image data operations go through the REST API (`/api/*`) to the SQLite database. The frontend has no direct database access. IndexedDB/Dexie has been fully removed.
 
 ```
-images      — fingerprint (PK), file_path, root_path, filename,
+images      — fingerprint (PK), file_path, root_path, filename, subfolder,
               agent, model_name, model_hash, prompt, negative_prompt,
-              sampler, steps, cfg_scale, seed, input_strength,
+              sampler, steps, cfg_scale, seed, input_strength, loras,
               width, height, aesthetic_score,
               controlnet_module, controlnet_model, controlnet_weight,
-              controlnet_guidance_strength, btime, mtime, indexed_at
+              controlnet_guidance_strength, size, btime, mtime, indexed_at
 tags        — id, name (UNIQUE COLLATE NOCASE)
 image_tags  — fingerprint, tag_id, added_at
 settings    — key, val
 folders     — path, added_at
 checkpoints — root_path, btime (incremental sync state)
-favorites   — query, label, is_global, created_at
+favorites   — id, query, label, is_global, created_at
+trash       — fingerprint, original_path, trash_path, deleted_at, metadata
 ```
 
-**Video library — SQLite via better-sqlite3 (current)**
+**Video library — SQLite via better-sqlite3 (implemented)**
+
+The video library has its own SQLite database and is accessed via Electron IPC from the video view. The image and video UIs are intentionally separate. The plan is to perfect the image UI/UX first, then apply the same patterns to the video library.
+
 ```
 videos      — fingerprint (PK), file_path, filename, size,
               width, height, duration, aspect_ratio,
@@ -135,16 +139,19 @@ appdata/breadboard/gm/
 ### Key design decisions
 
 **Why SQLite for both libraries?**
-IndexedDB (the current image store) has well-documented performance problems at scale. Bulk inserts of 30k records can take minutes. Full-table scans for complex queries are slow and block the renderer thread. SQLite with WAL mode handles hundreds of thousands of rows with sub-millisecond indexed queries, runs on the server side (no renderer blocking), and gives us proper SQL for the complex filtering the search system needs. `better-sqlite3` is the right choice: synchronous API (no callback hell), fastest Node.js SQLite binding, prebuilt binaries for Win/Mac/Linux x64 and arm64 via `electron-builder`'s `postinstall` rebuild. The native rebuild is a one-time setup cost, not an ongoing burden.
+IndexedDB had well-documented performance problems at scale — bulk inserts of 30k records could take minutes, and full-table scans blocked the renderer thread. SQLite with WAL mode handles hundreds of thousands of rows with sub-millisecond indexed queries, runs server-side (no renderer blocking), and gives us proper SQL for the complex filtering the search system needs. The image library migration is complete. `better-sqlite3` provides a synchronous API, prebuilt binaries for all platforms, and automatic rebuild via `electron-builder`'s `postinstall` hook.
 
 **Why XMP on files?**
-Tags and metadata are written back to the source files in XMP format. This means user tags survive a full re-index — the database is always reconstructable from the files themselves. This is a strong design principle to preserve. The database is a cache; the files are the truth.
+Tags and metadata are written back to the source files in XMP format. This means user tags survive a full re-index — the database is always reconstructable from the files themselves. The database is a cache; the files are the truth.
 
 **Why fingerprint-based IDs?**
-The video database already uses SHA-256 fingerprinting (head + tail sampling + size + mtime). The image library currently uses file path as PK — a known weakness. When a file is renamed or moved, it loses its DB record. The migration to SQLite is the right time to fix this for images too. Fingerprint = stable identity across renames and moves.
+Both databases use SHA-256 fingerprinting (head + tail 64KB sampling + size + created timestamp). Files retain their identity across renames and moves.
 
 **Why keep image and video as separate SQLite databases?**
 They serve different views with different schemas, different metadata, and different workflows. A single DB would add complexity with no user-facing benefit. Two separate `.sqlite` files in `appdata/` is clean, simple, and independently resettable.
+
+**Development approach: image-first, then video.**
+The image UI/UX is being perfected first — card layout, metadata display, search, tags, settings. Once the patterns are solid, the same improvements will be applied to the video library. This avoids doing everything twice while the design is still being iterated.
 
 ---
 
@@ -153,14 +160,14 @@ They serve different views with different schemas, different metadata, and diffe
 ### Image metadata pipeline
 
 ```
-File detected by Chokidar
-  → parser.js detects source app
+File detected by Chokidar watcher
+  → parser.js detects source app (A1111, ComfyUI, InvokeAI, etc.)
   → appropriate crawler extracts raw metadata
   → normalized to XMP schema
   → written to appdata/breadboard/gm/agent/<cid>.xmp
-  → broadcast via Socket.IO
-  → renderer inserts into IndexedDB
-  → card rendered in gallery
+  → indexed into SQLite (image-database.js)
+  → progress broadcast via Socket.IO
+  → renderer refreshes from API on completion
 ```
 
 ### Supported generation tools (images)
@@ -256,56 +263,25 @@ created ↓↑, updated ↓↑, prompt a-z/z-a, width ↓↑, height ↓↑, aes
 
 ---
 
-## 6. The Database Migration — The Foundational Decision
+## 6. The Database Migration — Complete
 
-This is the most important architectural decision in the near-term roadmap. Everything else builds on it.
+The image library has been migrated from IndexedDB/Dexie to SQLite (`better-sqlite3`). This was the foundational architectural change that everything else builds on.
 
-### The problem with IndexedDB at scale
-
-The image library currently uses IndexedDB via Dexie.js. This works fine for small libraries but has hard limits:
-
-- Bulk inserts of 30k records can take several minutes (documented Dexie issue)
-- Full-table scans for complex queries run on the renderer thread — they block the UI
-- No server-side query layer — all filtering happens in a Web Worker, which is limited
-- The `tokens[]` array approach for search is a workaround for the lack of proper SQL
-- IndexedDB storage can balloon unpredictably (Chromium's LevelDB underneath)
-- No WAL mode, no VACUUM, no fine-grained indexing control
-
-For a user with 50k+ images — which is normal for this community — this is a real problem, not a theoretical one.
-
-### The solution: better-sqlite3 for images too
-
-Migrate the image library from IndexedDB to SQLite (`better-sqlite3`), matching the video library's approach. This gives us:
-
-- Sub-millisecond indexed queries on 500k+ rows
-- WAL mode for concurrent reads during writes (no UI blocking during sync)
-- Proper SQL for the complex multi-field filtering the search system needs
-- Server-side query execution — renderer just receives results
-- Predictable storage size
-- Fingerprint-based PKs (fix the rename/move problem at the same time)
-- One consistent data layer for both libraries
-
-**On the native module concern:** `better-sqlite3` requires a native rebuild per Electron version. This is handled automatically by `electron-builder`'s `postinstall` hook (`electron-builder install-app-deps`), which is already in `package.json`. Prebuilt binaries exist for Win/Mac/Linux x64 and arm64. This is a solved problem in the Electron ecosystem — VS Code, Obsidian, and many other major Electron apps use `better-sqlite3`.
-
-### Migration plan (high level)
-
-1. Build the new SQLite image schema (modeled on the video DB, with image-specific fields)
-2. Build a server-side query API that mirrors the current IPC interface
-3. On first launch after update: detect existing IndexedDB data, offer migration or fresh re-index
-4. For Pinokio users (fresh installs): no migration needed, just re-index
-5. Keep XMP files as the source of truth — re-index always works from files
+### What was done
+- Built `app/server/image-database.js` — full SQLite schema with fingerprint PKs, search engine, tags, soft-delete, subfolder tracking
+- Built REST API layer (`/api/*` endpoints) on the Express server
+- Rewired all frontend modules (`app.js`, `api.js`, `navbar.js`) to use the API
+- Rewired all views (`settings.ejs`, `connect.ejs`, `favorites.ejs`, `card.ejs`, `viewer.ejs`)
+- Updated IPC sync pipeline to write to SQLite during indexing
+- Removed IndexedDB/Dexie entirely (`dexie.js`, `db.js`, `worker.js` deleted)
+- Removed Clusterize.js (incompatible with CSS grid layout)
 
 ### What stays the same
-
 - XMP metadata on files (tags survive re-index)
 - The search query syntax (same syntax, now executed as SQL)
-- The IPC/Socket.IO communication pattern
-- Virtual scrolling and card rendering in the renderer
-- All existing UI behavior
-
-### Current state
-
-The image library is still on IndexedDB. The video library is on SQLite. The migration is the next major foundational task before building new features on top of the image library.
+- The IPC/Socket.IO communication pattern for sync progress
+- Card rendering and all existing UI behavior
+- The video library (unchanged, still on its own SQLite DB)
 
 ---
 
@@ -336,12 +312,13 @@ The "View XML" button was removed in the recent card refactor but the XMP viewer
 
 Features are grouped by theme. The database migration (§6) is a prerequisite for most image library work and should happen first.
 
-### 8.1 Database Migration (prerequisite)
+### 8.1 Database Migration ✅ Complete
 
-- Migrate image library from IndexedDB/Dexie to SQLite/better-sqlite3
-- Fingerprint-based PKs for images (fix rename/move identity loss)
-- Server-side query API replacing the Web Worker search approach
-- Fresh install only — no migration of existing IndexedDB data needed
+- Image library migrated from IndexedDB/Dexie to SQLite/better-sqlite3
+- Fingerprint-based PKs for images
+- Server-side search via REST API
+- All views and frontend modules rewired
+- Dead code removed (Dexie, Web Worker, Clusterize)
 
 ### 8.2 Folder Management UX Overhaul
 
@@ -504,9 +481,8 @@ The app runs on Windows, Linux, and macOS. Every file system operation must use 
 
 | File | Role |
 |------|------|
-| `app.js` | Main controller — DB init, sync orchestration, live updates, draw loop |
-| `api.js` | HTTP + Socket.IO communication layer |
-| `db.js` | IndexedDB init via Dexie — schema, migrations |
+| `app.js` | Main controller — sync orchestration, draw loop, settings init |
+| `api.js` | REST API + Socket.IO communication layer |
 | `navbar.js` | Search bar, sort selector, favorites, view options, notifications |
 | `handler.js` | Click handlers — card expand/collapse, favoriting, viewer launch |
 | `card.js` | Card HTML template function — renders metadata, tags, action buttons |
@@ -532,8 +508,6 @@ The app runs on Windows, Linux, and macOS. Every file system operation must use 
 
 | Library | Purpose |
 |---------|---------|
-| Dexie.js | IndexedDB wrapper |
-| Clusterize.js | Virtual scrolling |
 | Viewer.js | Image zoom/pan/rotate |
 | Socket.IO client | Real-time updates |
 | Tippy.js | Tooltips |

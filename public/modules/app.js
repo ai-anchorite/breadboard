@@ -339,7 +339,7 @@ class App {
     })
 
     let data = items.map((item) => {
-      return `<div class='card' data-root="${item.root_path}" data-src="${item.file_path}" data-fingerprint="${item.fingerprint}">${card(item, this.stripPunctuation, false)}</div>`
+      return `<div class='card' data-root="${item.root_path}" data-src="${item.file_path}" data-fingerprint="${item.fingerprint}">${card(item, this.stripPunctuation)}</div>`
     })
 
     // Render all cards directly — images use loading="lazy" for performance
