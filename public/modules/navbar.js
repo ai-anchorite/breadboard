@@ -117,6 +117,13 @@ class Navbar {
         </div>
 
         <div class='sb-section'>
+          <h4><i class="fa-solid fa-eye-slash"></i> Auto-hide Nav</h4>
+          <div class='sb-row'>
+            <label><input type='checkbox' id='sb-autohide-nav' ${this.app.autoHideNav ? 'checked' : ''}> Hide nav bar until hover</label>
+          </div>
+        </div>
+
+        <div class='sb-section'>
           <h4><i class="fa-solid fa-id-card"></i> Card Header</h4>
           <div class='sb-row sb-minimal-row'>
             <label><input type='radio' name='sb-minimal' value='default' ${minimal === 'default' ? 'checked' : ''}> Always</label>
@@ -185,6 +192,16 @@ class Navbar {
         btn.classList.add('active')
       })
     })
+
+    // Auto-hide nav
+    const autoHideCheck = sidebar.querySelector('#sb-autohide-nav')
+    if (autoHideCheck) {
+      autoHideCheck.addEventListener('change', async () => {
+        this.app.autoHideNav = autoHideCheck.checked
+        await this.app.api.setSetting('autohide_nav', autoHideCheck.checked)
+        this.app.applyAutoHideNav()
+      })
+    }
 
     // Card header
     sidebar.querySelectorAll('[name=sb-minimal]').forEach(el => {

@@ -331,41 +331,32 @@ class Selection {
     })
   }
   async del() {
-    const confirmed = confirm("Delete the selected files from your device?")
+    const confirmed = confirm("Move selected files to trash?")
     if (confirmed) {
-      let selected = this.els.map((el) => {
-        return el.getAttribute("data-src")
-      })
-      await this.api.del(selected)
-      let res = await this.app.db.files.where("file_path").anyOf(selected).delete()
+      let fingerprints = this.els.map(el => el.getAttribute("data-fingerprint")).filter(fp => fp)
 
+      if (fingerprints.length > 0) {
+        await this.api.deleteImages(fingerprints)
+      }
 
-      // get the next element to focus after deleting
-
+      // Get the next element to focus after deleting
       let focusEl = this.els[this.els.length-1].nextSibling
       if (!focusEl) {
         focusEl = this.els[0].previousSibling
       }
-      for(let el of this.els) {
-        el.classList.remove("expanded")
+      for (let el of this.els) {
         el.classList.add("removed")
-        setTimeout(() => {
-          el.remove()
-        }, 1000)
+        setTimeout(() => el.remove(), 500)
       }
 
-      console.log("focusEl", focusEl)
       if (focusEl) {
-        if (this.app.handler.viewer && this.app.handler.viewer.isShown) {
-          this.app.handler.view(focusEl)
-        }
         this.els = [focusEl]
         this.ds.setSelection(this.els)
+        this.update(this.els)
       } else {
-        this.app.handler.unview()
         this.els = []
         this.ds.clearSelection()
-        document.querySelector("footer").classList.add("hidden")
+        this.update([])
       }
     }
   }

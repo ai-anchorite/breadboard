@@ -220,6 +220,82 @@ class App {
     if (res.val) {
       this.zoom = parseInt(res.val)
     }
+
+    // Auto-hide nav
+    let autoHideRes = await this.api.getSetting('autohide_nav')
+    this.autoHideNav = autoHideRes.val === 'true' || autoHideRes.val === true
+    this.applyAutoHideNav()
+  }
+
+  applyAutoHideNav() {
+    const nav = document.querySelector('nav')
+    if (!nav) return
+
+    // Clean up previous listeners
+    if (this._navMouseLeave) {
+      nav.removeEventListener('mouseleave', this._navMouseLeave)
+      this._navMouseLeave = null
+    }
+    if (this._navTriggerMove) {
+      document.removeEventListener('mousemove', this._navTriggerMove)
+      this._navTriggerMove = null
+    }
+    if (this._navHideTimer) {
+      clearTimeout(this._navHideTimer)
+      this._navHideTimer = null
+    }
+
+    // Remove drag zone if exists
+    const existingDragZone = document.getElementById('autohide-drag-zone')
+    if (existingDragZone) existingDragZone.remove()
+
+    if (this.autoHideNav) {
+      nav.classList.add('autohide')
+
+      // Create a thin drag zone at the very top for window dragging
+      const dragZone = document.createElement('div')
+      dragZone.id = 'autohide-drag-zone'
+      document.body.appendChild(dragZone)
+
+      // Show nav when mouse moves to top 8px of window
+      this._navTriggerMove = (e) => {
+        if (e.clientY <= 8) {
+          if (this._navHideTimer) {
+            clearTimeout(this._navHideTimer)
+            this._navHideTimer = null
+          }
+          nav.classList.add('force-show')
+        }
+      }
+      document.addEventListener('mousemove', this._navTriggerMove)
+
+      // Hide nav with a delay when mouse leaves
+      this._navMouseLeave = () => {
+        if (this._navHideTimer) clearTimeout(this._navHideTimer)
+        this._navHideTimer = setTimeout(() => {
+          nav.classList.remove('force-show')
+          this._navHideTimer = null
+        }, 600)
+      }
+      nav.addEventListener('mouseleave', this._navMouseLeave)
+
+      // Cancel hide if mouse re-enters nav
+      nav.addEventListener('mouseenter', () => {
+        if (this._navHideTimer) {
+          clearTimeout(this._navHideTimer)
+          this._navHideTimer = null
+        }
+      })
+
+      const container = document.querySelector('.container')
+      if (container) container.style.paddingTop = '6px'
+    } else {
+      nav.classList.remove('autohide')
+      nav.classList.remove('force-show')
+
+      const container = document.querySelector('.container')
+      if (container) container.style.paddingTop = nav.offsetHeight + 'px'
+    }
   }
 
   async init_theme () {

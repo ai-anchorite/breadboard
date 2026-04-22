@@ -73,6 +73,30 @@ nav {
   box-sizing: border-box;
   z-index: 10000;
   flex-wrap: wrap;
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+nav.autohide {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.5s ease 0.3s, opacity 0.5s ease 0.3s;
+}
+nav.autohide.force-show {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+/* Thin drag zone at top of screen when nav is auto-hidden */
+#autohide-drag-zone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  z-index: 9999;
+  -webkit-app-region: drag;
+  cursor: grab;
 }
 nav .nav-child {
   display: flex;
@@ -1572,9 +1596,11 @@ nav button {
 /* --- Custom Image Viewer Overlay --- */
 #bb-viewer-overlay {
   position: fixed;
+  top: 0;
   left: 0;
   width: 100vw;
-  background: rgba(0,0,0,0.92);
+  height: 100vh;
+  background: rgba(0,0,0,0.95);
   z-index: 9999;
   display: flex;
 }
@@ -1599,7 +1625,6 @@ nav button {
   justify-content: center;
   width: 100%;
   height: 100%;
-  padding: 10px;
   overflow: hidden;
 }
 .bb-viewer-img {
@@ -1607,7 +1632,8 @@ nav button {
   max-height: 100%;
   object-fit: contain;
   user-select: none;
-  transition: transform 0.15s ease;
+  transform-origin: center center;
+  transition: none;
 }
 .bb-viewer-nav {
   position: absolute;
@@ -1663,15 +1689,17 @@ nav button {
 
 /* --- Viewer Info Panel (right sidebar) --- */
 #bb-viewer-panel {
-  width: 350px;
-  min-width: 350px;
-  height: 100%;
+  width: 370px;
+  min-width: 370px;
+  height: 100vh;
   background: #1a1a1a;
   color: #ddd;
   overflow-y: auto;
+  overflow-x: hidden;
   font-size: 13px;
   border-left: 1px solid #333;
-  transition: width 0.2s ease, min-width 0.2s ease, padding 0.2s ease, border 0.2s ease;
+  transition: width 0.2s ease, min-width 0.2s ease, border 0.2s ease;
+  box-sizing: border-box;
 }
 #bb-viewer-panel.collapsed {
   width: 0;

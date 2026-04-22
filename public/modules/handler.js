@@ -3,6 +3,9 @@ class Handler {
     this.app = app
     this.api = api
     this._zoom = 1
+    this._panX = 0
+    this._panY = 0
+    this._isPanning = false
     this._slideshowTimer = null
 
     // --- Main container click handler ---
@@ -40,7 +43,7 @@ class Handler {
   }
 
   // =============================================
-  // Custom fullscreen viewer with info panel
+  // Fullscreen viewer with pan/zoom and info panel
   // =============================================
 
   _openViewer(selectedCard) {
@@ -62,12 +65,34 @@ class Handler {
 
     this._currentIndex = selectedIndex >= 0 ? selectedIndex : 0
     this._zoom = 1
+    this._panX = 0
+    this._panY = 0
     this._stopSlideshow()
+
+    // Clear selection so footer hides
+    if (this.app.selection) {
+      this.app.selection.els = []
+      if (this.app.selection.ds) this.app.selection.ds.clearSelection()
+      this.app.selection.update([])
+    }
 
     this._buildOverlay()
     this._showImage(this._currentIndex)
 
+    // Force nav into auto-hide while viewer is open
+    const nav = document.querySelector('nav')
+    if (nav) {
+      this._navWasAutoHide = nav.classList.contains('autohide')
+      if (!this._navWasAutoHide) {
+        nav.classList.add('autohide')
+        // Recalculate container padding won't matter since overlay covers it
+      }
+      nav.classList.remove('force-show')
+    }
+
     this._keyHandler = (e) => {
+      // Don't handle keys if typing in tag input
+      if (e.target.tagName === 'INPUT') return
       if (e.key === 'Escape') this._closeOverlay()
       else if (e.key === 'ArrowLeft') this._navigate(-1)
       else if (e.key === 'ArrowRight') this._navigate(1)
@@ -83,16 +108,8 @@ class Handler {
   _buildOverlay() {
     this._closeOverlay(true)
 
-    // Measure nav and footer heights to position overlay between them
-    const nav = document.querySelector('nav')
-    const footer = document.querySelector('footer')
-    const navHeight = nav ? nav.offsetHeight - 1 : 0
-    const footerHeight = (footer && !footer.classList.contains('hidden')) ? footer.offsetHeight : 0
-
     const overlay = document.createElement('div')
     overlay.id = 'bb-viewer-overlay'
-    overlay.style.top = navHeight + 'px'
-    overlay.style.height = `calc(100vh - ${navHeight}px - ${footerHeight}px)`
     overlay.innerHTML = `
       <div class='bb-viewer-main'>
         <div class='bb-viewer-image-area'>
@@ -108,13 +125,13 @@ class Handler {
           <button class='bb-tb-btn bb-tb-next' title='Next'><i class="fa-solid fa-chevron-right"></i></button>
           <span class='bb-tb-sep'></span>
           <button class='bb-tb-btn bb-tb-zoom-out' title='Zoom out (−)'><i class="fa-solid fa-magnifying-glass-minus"></i></button>
-          <button class='bb-tb-btn bb-tb-zoom-reset' title='Reset zoom (0)'><i class="fa-solid fa-expand"></i></button>
+          <button class='bb-tb-btn bb-tb-zoom-reset' title='Fit to view (0)'><i class="fa-solid fa-expand"></i></button>
           <button class='bb-tb-btn bb-tb-zoom-in' title='Zoom in (+)'><i class="fa-solid fa-magnifying-glass-plus"></i></button>
           <span class='bb-tb-zoom-level'>100%</span>
           <span class='bb-tb-sep'></span>
           <button class='bb-tb-btn bb-tb-slideshow' title='Slideshow (Space)'><i class="fa-solid fa-play"></i></button>
           <span class='bb-tb-sep'></span>
-          <button class='bb-tb-btn bb-tb-panel-toggle' title='Toggle info panel'><i class="fa-solid fa-circle-info"></i></button>
+          <button class='bb-tb-btn bb-tb-panel-toggle' title='Toggle info panel (i)'><i class="fa-solid fa-circle-info"></i></button>
           <span class='bb-tb-sep'></span>
           <button class='bb-tb-btn bb-tb-close' title='Close (Esc)'><i class="fa-solid fa-xmark"></i></button>
         </div>
@@ -129,10 +146,9 @@ class Handler {
     `
     document.body.appendChild(overlay)
 
-    // --- Event wiring ---
     const $ = (sel) => overlay.querySelector(sel)
 
-    // Nav
+    // Nav buttons
     $('.bb-viewer-prev').addEventListener('click', (e) => { e.stopPropagation(); this._navigate(-1) })
     $('.bb-viewer-next').addEventListener('click', (e) => { e.stopPropagation(); this._navigate(1) })
     $('.bb-tb-prev').addEventListener('click', (e) => { e.stopPropagation(); this._navigate(-1) })
@@ -143,32 +159,81 @@ class Handler {
     $('.bb-tb-zoom-out').addEventListener('click', (e) => { e.stopPropagation(); this._zoomBy(-0.25) })
     $('.bb-tb-zoom-reset').addEventListener('click', (e) => { e.stopPropagation(); this._resetZoom() })
 
-    // Slideshow
+    // Slideshow & panel toggle
     $('.bb-tb-slideshow').addEventListener('click', (e) => { e.stopPropagation(); this._toggleSlideshow() })
-
-    // Panel toggle
     $('.bb-tb-panel-toggle').addEventListener('click', (e) => { e.stopPropagation(); this._togglePanel() })
-
-    // Close
     $('.bb-tb-close').addEventListener('click', (e) => { e.stopPropagation(); this._closeOverlay() })
 
-    // Click background to close
-    $('.bb-viewer-image-area').addEventListener('click', (e) => {
-      if (e.target.classList.contains('bb-viewer-image-area') || e.target.classList.contains('bb-viewer-img-wrap')) {
-        this._closeOverlay()
-      }
+    // Click background to close — but only if not dragging
+    // We track mouse movement to distinguish click from drag
+    let clickStartX, clickStartY, didDrag
+
+    $('.bb-viewer-image-area').addEventListener('mousedown', (e) => {
+      clickStartX = e.clientX
+      clickStartY = e.clientY
+      didDrag = false
     })
 
-    // Mouse wheel zoom on image area
+    // Mouse wheel zoom — zoom toward cursor position
     $('.bb-viewer-image-area').addEventListener('wheel', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      this._zoomBy(e.deltaY < 0 ? 0.15 : -0.15)
+      const delta = e.deltaY < 0 ? 0.15 : -0.15
+      this._zoomAtPoint(delta, e.clientX, e.clientY)
     }, { passive: false })
+
+    // Pan (drag) on the image
+    const imgWrap = $('.bb-viewer-img-wrap')
+    let dragStartX, dragStartY, startPanX, startPanY
+
+    imgWrap.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return
+      this._isPanning = true
+      dragStartX = e.clientX
+      dragStartY = e.clientY
+      startPanX = this._panX
+      startPanY = this._panY
+      imgWrap.style.cursor = 'grabbing'
+      e.preventDefault()
+    })
+
+    document.addEventListener('mousemove', this._onPanMove = (e) => {
+      if (!this._isPanning) return
+      const dx = e.clientX - dragStartX
+      const dy = e.clientY - dragStartY
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDrag = true
+      this._panX = startPanX + dx
+      this._panY = startPanY + dy
+      this._applyTransform()
+    })
+
+    document.addEventListener('mouseup', this._onPanEnd = (e) => {
+      if (this._isPanning) {
+        this._isPanning = false
+        const imgWrap = document.querySelector('.bb-viewer-img-wrap')
+        if (imgWrap) imgWrap.style.cursor = this._zoom > 1 ? 'grab' : 'default'
+      }
+      // Click-to-close: if mouse didn't drag, treat as a click
+      if (!didDrag && clickStartX !== undefined) {
+        const dx = Math.abs(e.clientX - clickStartX)
+        const dy = Math.abs(e.clientY - clickStartY)
+        if (dx < 5 && dy < 5) {
+          // Only close if clicking the background area or image (not nav buttons or toolbar)
+          const target = document.elementFromPoint(e.clientX, e.clientY)
+          if (target && (
+            target.classList.contains('bb-viewer-image-area') ||
+            target.classList.contains('bb-viewer-img-wrap') ||
+            target.classList.contains('bb-viewer-img')
+          )) {
+            this._closeOverlay()
+          }
+        }
+      }
+      clickStartX = undefined
+    })
 
     // Panel clicks don't close viewer
     $('.bb-viewer-panel').addEventListener('click', (e) => e.stopPropagation())
-    // Toolbar clicks don't close viewer
     $('.bb-viewer-toolbar').addEventListener('click', (e) => e.stopPropagation())
   }
 
@@ -179,6 +244,8 @@ class Handler {
     if (newIndex >= 0 && newIndex < this._cardData.length) {
       this._currentIndex = newIndex
       this._zoom = 1
+      this._panX = 0
+      this._panY = 0
       this._showImage(newIndex)
     }
   }
@@ -190,40 +257,73 @@ class Handler {
     const img = document.querySelector('.bb-viewer-img')
     if (img) {
       img.src = data.imgSrc
-      img.style.transform = `scale(${this._zoom})`
+      this._applyTransform()
     }
 
-    // Counters
     const label = `${index + 1} / ${this._cardData.length}`
     const counter = document.querySelector('.bb-viewer-counter')
     const counterPanel = document.querySelector('.bb-viewer-counter-panel')
     if (counter) counter.textContent = label
     if (counterPanel) counterPanel.textContent = label
 
-    // Nav visibility
     const prev = document.querySelector('.bb-viewer-prev')
     const next = document.querySelector('.bb-viewer-next')
     if (prev) prev.style.visibility = index > 0 ? 'visible' : 'hidden'
     if (next) next.style.visibility = index < this._cardData.length - 1 ? 'visible' : 'hidden'
 
+    const imgWrap = document.querySelector('.bb-viewer-img-wrap')
+    if (imgWrap) imgWrap.style.cursor = 'default'
+
     this._updateZoomLabel()
     await this._loadPanel(data)
   }
 
-  // --- Zoom ---
+  // --- Zoom & Pan ---
 
   _zoomBy(delta) {
-    this._zoom = Math.max(0.1, Math.min(10, this._zoom + delta))
-    const img = document.querySelector('.bb-viewer-img')
-    if (img) img.style.transform = `scale(${this._zoom})`
+    this._zoom = Math.max(0.1, Math.min(20, this._zoom + delta))
+    this._applyTransform()
     this._updateZoomLabel()
+    const imgWrap = document.querySelector('.bb-viewer-img-wrap')
+    if (imgWrap) imgWrap.style.cursor = this._zoom > 1 ? 'grab' : 'default'
+  }
+
+  _zoomAtPoint(delta, clientX, clientY) {
+    const imgWrap = document.querySelector('.bb-viewer-img-wrap')
+    if (!imgWrap) return
+
+    const rect = imgWrap.getBoundingClientRect()
+    const cx = clientX - rect.left - rect.width / 2
+    const cy = clientY - rect.top - rect.height / 2
+
+    const oldZoom = this._zoom
+    this._zoom = Math.max(0.1, Math.min(20, this._zoom + delta))
+    const scale = this._zoom / oldZoom
+
+    // Adjust pan so the point under the cursor stays fixed
+    this._panX = cx - scale * (cx - this._panX)
+    this._panY = cy - scale * (cy - this._panY)
+
+    this._applyTransform()
+    this._updateZoomLabel()
+    if (imgWrap) imgWrap.style.cursor = this._zoom > 1 ? 'grab' : 'default'
   }
 
   _resetZoom() {
     this._zoom = 1
-    const img = document.querySelector('.bb-viewer-img')
-    if (img) img.style.transform = `scale(1)`
+    this._panX = 0
+    this._panY = 0
+    this._applyTransform()
     this._updateZoomLabel()
+    const imgWrap = document.querySelector('.bb-viewer-img-wrap')
+    if (imgWrap) imgWrap.style.cursor = 'default'
+  }
+
+  _applyTransform() {
+    const img = document.querySelector('.bb-viewer-img')
+    if (img) {
+      img.style.transform = `translate(${this._panX}px, ${this._panY}px) scale(${this._zoom})`
+    }
   }
 
   _updateZoomLabel() {
@@ -234,79 +334,69 @@ class Handler {
   // --- Slideshow ---
 
   _toggleSlideshow() {
-    if (this._slideshowTimer) {
-      this._stopSlideshow()
-    } else {
-      this._startSlideshow()
-    }
+    if (this._slideshowTimer) this._stopSlideshow()
+    else this._startSlideshow()
   }
 
   _startSlideshow() {
     const interval = (this.app.style && this.app.style.slideshow_interval) ? this.app.style.slideshow_interval : 3000
     const btn = document.querySelector('.bb-tb-slideshow i')
     if (btn) { btn.classList.remove('fa-play'); btn.classList.add('fa-pause') }
-
     this._slideshowTimer = setInterval(() => {
-      if (this._currentIndex < this._cardData.length - 1) {
-        this._navigate(1)
-      } else {
-        // Loop back to start
-        this._currentIndex = -1
-        this._navigate(1)
-      }
+      if (this._currentIndex < this._cardData.length - 1) this._navigate(1)
+      else { this._currentIndex = -1; this._navigate(1) }
     }, interval)
   }
 
   _stopSlideshow() {
-    if (this._slideshowTimer) {
-      clearInterval(this._slideshowTimer)
-      this._slideshowTimer = null
-    }
+    if (this._slideshowTimer) { clearInterval(this._slideshowTimer); this._slideshowTimer = null }
     const btn = document.querySelector('.bb-tb-slideshow i')
     if (btn) { btn.classList.remove('fa-pause'); btn.classList.add('fa-play') }
   }
 
   // --- Panel ---
 
+  _togglePanel() {
+    const panel = document.getElementById('bb-viewer-panel')
+    if (!panel) return
+    panel.classList.toggle('collapsed')
+    const btn = document.querySelector('.bb-tb-panel-toggle i')
+    if (btn) btn.style.opacity = panel.classList.contains('collapsed') ? '0.4' : '1'
+  }
+
   async _loadPanel(data) {
     const panelBody = document.querySelector('#bb-viewer-panel .panel-body')
     if (!panelBody) return
-
     let meta = {}
-    try {
-      meta = await this.api.getImage(data.fingerprint)
-    } catch (e) {
-      console.error('Failed to load metadata:', e)
-    }
-
+    try { meta = await this.api.getImage(data.fingerprint) } catch (e) {}
     panelBody.innerHTML = this._buildPanelHTML(meta)
     this._attachPanelHandlers(panelBody, meta)
   }
 
   _closeOverlay(silent) {
     this._stopSlideshow()
+    // Remove pan listeners
+    if (this._onPanMove) { document.removeEventListener('mousemove', this._onPanMove); this._onPanMove = null }
+    if (this._onPanEnd) { document.removeEventListener('mouseup', this._onPanEnd); this._onPanEnd = null }
     const overlay = document.getElementById('bb-viewer-overlay')
     if (overlay) overlay.remove()
     if (this._keyHandler && !silent) {
       document.removeEventListener('keydown', this._keyHandler)
       this._keyHandler = null
     }
-  }
-
-  _togglePanel() {
-    const panel = document.getElementById('bb-viewer-panel')
-    if (!panel) return
-    panel.classList.toggle('collapsed')
-    // Update the toggle button icon
-    const btn = document.querySelector('.bb-tb-panel-toggle i')
-    if (btn) {
-      if (panel.classList.contains('collapsed')) {
-        btn.classList.remove('fa-circle-info')
-        btn.classList.add('fa-circle-info')
-        btn.style.opacity = '0.4'
-      } else {
-        btn.style.opacity = '1'
+    // Restore nav auto-hide state
+    if (!silent) {
+      const nav = document.querySelector('nav')
+      if (nav && !this._navWasAutoHide) {
+        nav.classList.remove('autohide')
+        nav.classList.remove('force-show')
       }
+    }
+    // Clear selection when viewer closes so footer hides
+    if (!silent && this.app.selection) {
+      this.app.selection.els = []
+      if (this.app.selection.ds) this.app.selection.ds.clearSelection()
+      this.app.selection.update([])
     }
   }
 
@@ -333,8 +423,7 @@ class Handler {
       'agent', 'model_name', 'model_hash', 'sampler', 'steps', 'cfg_scale',
       'seed', 'input_strength', 'width', 'height', 'aesthetic_score', 'loras',
       'negative_prompt', 'controlnet_module', 'controlnet_model',
-      'controlnet_weight', 'controlnet_guidance_strength',
-      'subfolder', 'file_path'
+      'controlnet_weight', 'controlnet_guidance_strength', 'subfolder', 'file_path'
     ]
 
     let metaRows = ''
@@ -398,12 +487,8 @@ class Handler {
         const fp = tagInput.getAttribute('data-fingerprint')
         const src = tagInput.getAttribute('data-src')
         const root = tagInput.getAttribute('data-root')
-
         if (fp) await this.api.addImageTags([fp], [val])
-        await this.api.gm({
-          path: "user", cmd: "set",
-          args: [src, { "dc:subject": [{ val, mode: "merge" }] }]
-        })
+        await this.api.gm({ path: "user", cmd: "set", args: [src, { "dc:subject": [{ val, mode: "merge" }] }] })
         tagInput.value = ''
         const data = this._cardData[this._currentIndex]
         if (data) await this._loadPanel(data)
@@ -414,10 +499,7 @@ class Handler {
       el.addEventListener('click', (e) => {
         e.stopPropagation()
         const filter = el.getAttribute('data-filter')
-        if (filter) {
-          this._closeOverlay()
-          this.app.search(filter)
-        }
+        if (filter) { this._closeOverlay(); this.app.search(filter) }
       })
     })
   }
@@ -430,7 +512,6 @@ class Handler {
     let card = btn.closest(".card")
     let root = card.querySelector("img").getAttribute("data-root")
     let fp = card.getAttribute("data-fingerprint")
-
     if (is_favorited) {
       if (fp) await this.api.removeImageTags([fp], ['favorite'])
       await this.api.gm({ path: "user", cmd: "set", args: [src, { "dc:subject": [{ val: "favorite", mode: "delete" }] }] })
@@ -438,7 +519,6 @@ class Handler {
       if (fp) await this.api.addImageTags([fp], ['favorite'])
       await this.api.gm({ path: "user", cmd: "set", args: [src, { "dc:subject": [{ val: "favorite", mode: "merge" }] }] })
     }
-
     const newFav = !is_favorited
     btn.setAttribute("data-favorited", newFav)
     const icon = btn.querySelector("i")
