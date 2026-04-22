@@ -162,6 +162,20 @@ class Navbar {
           <button class='sb-btn sb-reindex'><i class="fa-solid fa-rotate"></i> Re-index from Scratch</button>
         </div>
 
+        <div class='sb-section'>
+          <h4><i class="fa-solid fa-trash-can"></i> Deleted Files</h4>
+          <div class='sb-row'>
+            <label><input type='checkbox' id='sb-confirm-delete' ${this.app.confirmDelete ? 'checked' : ''}> Ask before deleting</label>
+          </div>
+          <div class='sb-row sb-trash-info'>
+            <span class='sb-label'>Loading...</span>
+          </div>
+          <div class='sb-row sb-trash-actions' style='display:none'>
+            <button class='sb-btn sb-open-trash'><i class="fa-regular fa-folder-open"></i> Open Folder</button>
+            <button class='sb-btn sb-empty-trash' style='color:#e55'><i class="fa-solid fa-trash"></i> Empty Trash</button>
+          </div>
+        </div>
+
         ${AGENT === 'electron' ? `
         <div class='sb-section'>
           <h4><i class="fa-solid fa-terminal"></i> Debug</h4>
@@ -200,6 +214,15 @@ class Navbar {
         this.app.autoHideNav = autoHideCheck.checked
         await this.app.api.setSetting('autohide_nav', autoHideCheck.checked)
         this.app.applyAutoHideNav()
+      })
+    }
+
+    // Confirm on delete
+    const confirmCheck = sidebar.querySelector('#sb-confirm-delete')
+    if (confirmCheck) {
+      confirmCheck.addEventListener('change', async () => {
+        this.app.confirmDelete = confirmCheck.checked
+        await this.app.api.setSetting('confirm_delete', confirmCheck.checked)
       })
     }
 
@@ -249,10 +272,52 @@ class Navbar {
       location.href = "/?synchronize=reindex"
     })
 
+    // Trash management
+    this._loadTrashInfo(sidebar)
+
     // Debug
     const debugBtn = sidebar.querySelector('.sb-debug')
     if (debugBtn) {
       debugBtn.addEventListener('click', () => this.app.api.debug())
+    }
+  }
+
+  async _loadTrashInfo(sidebar) {
+    const infoEl = sidebar.querySelector('.sb-trash-info')
+    const actionsEl = sidebar.querySelector('.sb-trash-actions')
+    if (!infoEl) return
+
+    try {
+      const trash = await this.app.api.getTrash()
+      if (trash.length > 0) {
+        infoEl.innerHTML = `<span class='sb-label'>${trash.length} file${trash.length > 1 ? 's' : ''} in trash</span>`
+        actionsEl.style.display = 'flex'
+
+        // Open trash folder
+        const openBtn = sidebar.querySelector('.sb-open-trash')
+        if (openBtn) {
+          openBtn.addEventListener('click', () => {
+            this.app.api.open(trash[0].trash_path)
+          })
+        }
+
+        // Empty trash
+        const emptyBtn = sidebar.querySelector('.sb-empty-trash')
+        if (emptyBtn) {
+          emptyBtn.addEventListener('click', async () => {
+            const ok = await this.app.confirm(`Permanently delete ${trash.length} file${trash.length > 1 ? 's' : ''} from trash? This cannot be undone.`)
+            if (ok) {
+              await this.app.api.emptyTrash()
+              await this._loadTrashInfo(sidebar)
+            }
+          })
+        }
+      } else {
+        infoEl.innerHTML = `<span class='sb-label' style='color:#888'>Trash is empty</span>`
+        actionsEl.style.display = 'none'
+      }
+    } catch (e) {
+      infoEl.innerHTML = `<span class='sb-label' style='color:#888'>Could not load trash</span>`
     }
   }
 

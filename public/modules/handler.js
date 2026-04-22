@@ -531,7 +531,7 @@ class Handler {
   async _trashFile(btn, card) {
     const fp = btn.getAttribute("data-fingerprint")
     if (!fp) return
-    if (!confirm("Move this image to trash?")) return
+    if (!await this.app.confirm("Move this image to trash?")) return
     await this.api.deleteImages([fp])
     card.remove()
   }

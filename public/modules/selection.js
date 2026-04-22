@@ -331,7 +331,7 @@ class Selection {
     })
   }
   async del() {
-    const confirmed = confirm("Move selected files to trash?")
+    const confirmed = await this.app.confirm("Move selected files to trash?")
     if (confirmed) {
       let fingerprints = this.els.map(el => el.getAttribute("data-fingerprint")).filter(fp => fp)
 

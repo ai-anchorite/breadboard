@@ -135,15 +135,8 @@ class App {
 
     // Determine if we need to sync
     let shouldSync = false
-    if (this.sync_mode === "reindex" || this.sync_mode === "reindex_folder") {
+    if (this.sync_mode === "reindex" || this.sync_mode === "reindex_folder" || this.sync_mode === "default") {
       shouldSync = true
-    } else if (this.sync_mode === "default") {
-      // Only sync on "default" if DB is empty but folders exist
-      let status = await this.api.getStatus()
-      let folders = await this.api.getFolders()
-      if (folders.length > 0 && status.imageCount === 0) {
-        shouldSync = true
-      }
     }
 
     if (shouldSync) {
@@ -225,6 +218,44 @@ class App {
     let autoHideRes = await this.api.getSetting('autohide_nav')
     this.autoHideNav = autoHideRes.val === 'true' || autoHideRes.val === true
     this.applyAutoHideNav()
+
+    // Confirm on delete
+    let confirmRes = await this.api.getSetting('confirm_delete')
+    this.confirmDelete = confirmRes.val != null ? (confirmRes.val === 'true' || confirmRes.val === true) : true
+  }
+
+  // Custom themed confirm dialog — returns a Promise<boolean>
+  confirm(message) {
+    if (!this.confirmDelete) return Promise.resolve(true)
+
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div')
+      overlay.className = 'bb-confirm-overlay'
+      overlay.innerHTML = `
+        <div class='bb-confirm-box'>
+          <div class='bb-confirm-msg'>${message}</div>
+          <div class='bb-confirm-actions'>
+            <button class='bb-confirm-cancel'>Cancel</button>
+            <button class='bb-confirm-ok'>Delete</button>
+          </div>
+        </div>
+      `
+      document.body.appendChild(overlay)
+
+      overlay.querySelector('.bb-confirm-cancel').addEventListener('click', () => {
+        overlay.remove()
+        resolve(false)
+      })
+      overlay.querySelector('.bb-confirm-ok').addEventListener('click', () => {
+        overlay.remove()
+        resolve(true)
+      })
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) { overlay.remove(); resolve(false) }
+      })
+      // Focus the cancel button so Enter doesn't accidentally confirm
+      overlay.querySelector('.bb-confirm-cancel').focus()
+    })
   }
 
   applyAutoHideNav() {

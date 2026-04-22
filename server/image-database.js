@@ -358,23 +358,22 @@ class ImageDatabase {
         const image = this._stmts.getByFingerprint.get(fp);
         if (!image) continue;
 
-        // Build trash path preserving original structure
-        const relativePath = path.relative(image.root_path, image.file_path);
-        const trashPath = path.join(trashDir, relativePath);
-        const trashSubdir = path.dirname(trashPath);
+        // Flat storage — just the filename, with collision handling
+        let filename = path.basename(image.file_path);
+        let trashPath = path.join(trashDir, filename);
+
+        // Handle filename collisions by prepending a timestamp
+        if (fs.existsSync(trashPath)) {
+          const ext = path.extname(filename);
+          const base = path.basename(filename, ext);
+          trashPath = path.join(trashDir, `${base}_${now}${ext}`);
+        }
 
         // Move file
         try {
-          if (!fs.existsSync(trashSubdir)) {
-            fs.mkdirSync(trashSubdir, { recursive: true });
-          }
           fs.renameSync(image.file_path, trashPath);
         } catch (err) {
-          // If rename fails (cross-device), copy + delete
           try {
-            if (!fs.existsSync(trashSubdir)) {
-              fs.mkdirSync(trashSubdir, { recursive: true });
-            }
             fs.copyFileSync(image.file_path, trashPath);
             fs.unlinkSync(image.file_path);
           } catch (copyErr) {
@@ -383,7 +382,7 @@ class ImageDatabase {
           }
         }
 
-        // Store trash record with full metadata for restore
+        // Store trash record with original path for restore
         const metadata = JSON.stringify(this.getImage(fp));
         this.db.prepare(`
           INSERT OR REPLACE INTO trash (fingerprint, original_path, trash_path, deleted_at, metadata)
@@ -407,7 +406,7 @@ class ImageDatabase {
         const trashRecord = this.db.prepare('SELECT * FROM trash WHERE fingerprint = ?').get(fp);
         if (!trashRecord) continue;
 
-        // Move file back
+        // Move file back to original location
         try {
           const originalDir = path.dirname(trashRecord.original_path);
           if (!fs.existsSync(originalDir)) {

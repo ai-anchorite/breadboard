@@ -1976,3 +1976,64 @@ body.default .sb-btn.active { background: royalblue; color: white; border-color:
 }
 .fp-disconnect { color: #e55; }
 .fp-disconnect:hover { background: rgba(238,85,85,0.15); }
+
+/* --- Custom Confirm Dialog --- */
+.bb-confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0,0,0,0.5);
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bb-confirm-box {
+  background: #222;
+  color: #ddd;
+  border-radius: 8px;
+  padding: 24px 28px;
+  min-width: 300px;
+  max-width: 420px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+}
+body.default .bb-confirm-box {
+  background: #fff;
+  color: #333;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+}
+.bb-confirm-msg {
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+.bb-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.bb-confirm-cancel, .bb-confirm-ok {
+  padding: 8px 18px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.bb-confirm-cancel {
+  background: #333;
+  color: #ccc;
+}
+.bb-confirm-cancel:hover { background: #444; }
+body.default .bb-confirm-cancel {
+  background: #e8e8e8;
+  color: #333;
+}
+body.default .bb-confirm-cancel:hover { background: #ddd; }
+.bb-confirm-ok {
+  background: #c0392b;
+  color: white;
+}
+.bb-confirm-ok:hover { background: #e74c3c; }
