@@ -2,8 +2,8 @@ class Handler {
   constructor(app, api) {
     this.app = app
     this.api = api
-    this.viewer = null
-    this.viewerContainer = null
+    this._zoom = 1
+    this._slideshowTimer = null
 
     // --- Main container click handler ---
     document.querySelector(".container").addEventListener("click", async (e) => {
@@ -39,13 +39,14 @@ class Handler {
     })
   }
 
-  // --- Custom fullscreen viewer with integrated info panel ---
+  // =============================================
+  // Custom fullscreen viewer with info panel
+  // =============================================
 
   _openViewer(selectedCard) {
     const allCards = Array.from(document.querySelectorAll('.content .card'))
     const selectedIndex = allCards.indexOf(selectedCard)
 
-    // Collect card data
     this._cardData = []
     allCards.forEach(card => {
       const img = card.querySelector('img')
@@ -60,72 +61,124 @@ class Handler {
     })
 
     this._currentIndex = selectedIndex >= 0 ? selectedIndex : 0
+    this._zoom = 1
+    this._stopSlideshow()
 
-    // Build the overlay
     this._buildOverlay()
     this._showImage(this._currentIndex)
 
-    // Keyboard navigation
     this._keyHandler = (e) => {
       if (e.key === 'Escape') this._closeOverlay()
       else if (e.key === 'ArrowLeft') this._navigate(-1)
       else if (e.key === 'ArrowRight') this._navigate(1)
+      else if (e.key === '+' || e.key === '=') this._zoomBy(0.25)
+      else if (e.key === '-') this._zoomBy(-0.25)
+      else if (e.key === '0') this._resetZoom()
+      else if (e.key === ' ') { e.preventDefault(); this._toggleSlideshow() }
+      else if (e.key === 'i') this._togglePanel()
     }
     document.addEventListener('keydown', this._keyHandler)
   }
 
   _buildOverlay() {
-    // Remove existing
     this._closeOverlay(true)
+
+    // Measure nav and footer heights to position overlay between them
+    const nav = document.querySelector('nav')
+    const footer = document.querySelector('footer')
+    const navHeight = nav ? nav.offsetHeight - 1 : 0
+    const footerHeight = (footer && !footer.classList.contains('hidden')) ? footer.offsetHeight : 0
 
     const overlay = document.createElement('div')
     overlay.id = 'bb-viewer-overlay'
+    overlay.style.top = navHeight + 'px'
+    overlay.style.height = `calc(100vh - ${navHeight}px - ${footerHeight}px)`
     overlay.innerHTML = `
-      <div class='bb-viewer-image-area'>
-        <button class='bb-viewer-nav bb-viewer-prev' title='Previous'><i class="fa-solid fa-chevron-left"></i></button>
-        <div class='bb-viewer-img-wrap'>
-          <img class='bb-viewer-img' src='' alt=''>
+      <div class='bb-viewer-main'>
+        <div class='bb-viewer-image-area'>
+          <button class='bb-viewer-nav bb-viewer-prev' title='Previous (←)'><i class="fa-solid fa-chevron-left"></i></button>
+          <div class='bb-viewer-img-wrap'>
+            <img class='bb-viewer-img' src='' alt='' draggable='false'>
+          </div>
+          <button class='bb-viewer-nav bb-viewer-next' title='Next (→)'><i class="fa-solid fa-chevron-right"></i></button>
         </div>
-        <button class='bb-viewer-nav bb-viewer-next' title='Next'><i class="fa-solid fa-chevron-right"></i></button>
+        <div class='bb-viewer-toolbar'>
+          <button class='bb-tb-btn bb-tb-prev' title='Previous'><i class="fa-solid fa-chevron-left"></i></button>
+          <span class='bb-viewer-counter'></span>
+          <button class='bb-tb-btn bb-tb-next' title='Next'><i class="fa-solid fa-chevron-right"></i></button>
+          <span class='bb-tb-sep'></span>
+          <button class='bb-tb-btn bb-tb-zoom-out' title='Zoom out (−)'><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+          <button class='bb-tb-btn bb-tb-zoom-reset' title='Reset zoom (0)'><i class="fa-solid fa-expand"></i></button>
+          <button class='bb-tb-btn bb-tb-zoom-in' title='Zoom in (+)'><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+          <span class='bb-tb-zoom-level'>100%</span>
+          <span class='bb-tb-sep'></span>
+          <button class='bb-tb-btn bb-tb-slideshow' title='Slideshow (Space)'><i class="fa-solid fa-play"></i></button>
+          <span class='bb-tb-sep'></span>
+          <button class='bb-tb-btn bb-tb-panel-toggle' title='Toggle info panel'><i class="fa-solid fa-circle-info"></i></button>
+          <span class='bb-tb-sep'></span>
+          <button class='bb-tb-btn bb-tb-close' title='Close (Esc)'><i class="fa-solid fa-xmark"></i></button>
+        </div>
       </div>
       <div class='bb-viewer-panel' id='bb-viewer-panel'>
         <div class='panel-header'>
           <span>Image Info</span>
-          <span class='bb-viewer-counter'></span>
+          <span class='bb-viewer-counter-panel'></span>
         </div>
         <div class='panel-body'></div>
       </div>
     `
     document.body.appendChild(overlay)
 
-    // Event handlers
-    overlay.querySelector('.bb-viewer-prev').addEventListener('click', (e) => {
-      e.stopPropagation()
-      this._navigate(-1)
-    })
-    overlay.querySelector('.bb-viewer-next').addEventListener('click', (e) => {
-      e.stopPropagation()
-      this._navigate(1)
-    })
+    // --- Event wiring ---
+    const $ = (sel) => overlay.querySelector(sel)
 
-    // Click on image area background closes viewer
-    overlay.querySelector('.bb-viewer-image-area').addEventListener('click', (e) => {
-      // Only close if clicking the background, not the image or nav buttons
+    // Nav
+    $('.bb-viewer-prev').addEventListener('click', (e) => { e.stopPropagation(); this._navigate(-1) })
+    $('.bb-viewer-next').addEventListener('click', (e) => { e.stopPropagation(); this._navigate(1) })
+    $('.bb-tb-prev').addEventListener('click', (e) => { e.stopPropagation(); this._navigate(-1) })
+    $('.bb-tb-next').addEventListener('click', (e) => { e.stopPropagation(); this._navigate(1) })
+
+    // Zoom
+    $('.bb-tb-zoom-in').addEventListener('click', (e) => { e.stopPropagation(); this._zoomBy(0.25) })
+    $('.bb-tb-zoom-out').addEventListener('click', (e) => { e.stopPropagation(); this._zoomBy(-0.25) })
+    $('.bb-tb-zoom-reset').addEventListener('click', (e) => { e.stopPropagation(); this._resetZoom() })
+
+    // Slideshow
+    $('.bb-tb-slideshow').addEventListener('click', (e) => { e.stopPropagation(); this._toggleSlideshow() })
+
+    // Panel toggle
+    $('.bb-tb-panel-toggle').addEventListener('click', (e) => { e.stopPropagation(); this._togglePanel() })
+
+    // Close
+    $('.bb-tb-close').addEventListener('click', (e) => { e.stopPropagation(); this._closeOverlay() })
+
+    // Click background to close
+    $('.bb-viewer-image-area').addEventListener('click', (e) => {
       if (e.target.classList.contains('bb-viewer-image-area') || e.target.classList.contains('bb-viewer-img-wrap')) {
         this._closeOverlay()
       }
     })
 
-    // Clicks inside the panel do NOT close the viewer
-    overlay.querySelector('.bb-viewer-panel').addEventListener('click', (e) => {
+    // Mouse wheel zoom on image area
+    $('.bb-viewer-image-area').addEventListener('wheel', (e) => {
+      e.preventDefault()
       e.stopPropagation()
-    })
+      this._zoomBy(e.deltaY < 0 ? 0.15 : -0.15)
+    }, { passive: false })
+
+    // Panel clicks don't close viewer
+    $('.bb-viewer-panel').addEventListener('click', (e) => e.stopPropagation())
+    // Toolbar clicks don't close viewer
+    $('.bb-viewer-toolbar').addEventListener('click', (e) => e.stopPropagation())
   }
+
+  // --- Navigation ---
 
   _navigate(direction) {
     const newIndex = this._currentIndex + direction
     if (newIndex >= 0 && newIndex < this._cardData.length) {
       this._currentIndex = newIndex
+      this._zoom = 1
       this._showImage(newIndex)
     }
   }
@@ -137,23 +190,83 @@ class Handler {
     const img = document.querySelector('.bb-viewer-img')
     if (img) {
       img.src = data.imgSrc
+      img.style.transform = `scale(${this._zoom})`
     }
 
-    // Update counter
+    // Counters
+    const label = `${index + 1} / ${this._cardData.length}`
     const counter = document.querySelector('.bb-viewer-counter')
-    if (counter) {
-      counter.textContent = `${index + 1} / ${this._cardData.length}`
-    }
+    const counterPanel = document.querySelector('.bb-viewer-counter-panel')
+    if (counter) counter.textContent = label
+    if (counterPanel) counterPanel.textContent = label
 
-    // Update nav button visibility
+    // Nav visibility
     const prev = document.querySelector('.bb-viewer-prev')
     const next = document.querySelector('.bb-viewer-next')
     if (prev) prev.style.visibility = index > 0 ? 'visible' : 'hidden'
     if (next) next.style.visibility = index < this._cardData.length - 1 ? 'visible' : 'hidden'
 
-    // Load metadata into panel
+    this._updateZoomLabel()
     await this._loadPanel(data)
   }
+
+  // --- Zoom ---
+
+  _zoomBy(delta) {
+    this._zoom = Math.max(0.1, Math.min(10, this._zoom + delta))
+    const img = document.querySelector('.bb-viewer-img')
+    if (img) img.style.transform = `scale(${this._zoom})`
+    this._updateZoomLabel()
+  }
+
+  _resetZoom() {
+    this._zoom = 1
+    const img = document.querySelector('.bb-viewer-img')
+    if (img) img.style.transform = `scale(1)`
+    this._updateZoomLabel()
+  }
+
+  _updateZoomLabel() {
+    const label = document.querySelector('.bb-tb-zoom-level')
+    if (label) label.textContent = `${Math.round(this._zoom * 100)}%`
+  }
+
+  // --- Slideshow ---
+
+  _toggleSlideshow() {
+    if (this._slideshowTimer) {
+      this._stopSlideshow()
+    } else {
+      this._startSlideshow()
+    }
+  }
+
+  _startSlideshow() {
+    const interval = (this.app.style && this.app.style.slideshow_interval) ? this.app.style.slideshow_interval : 3000
+    const btn = document.querySelector('.bb-tb-slideshow i')
+    if (btn) { btn.classList.remove('fa-play'); btn.classList.add('fa-pause') }
+
+    this._slideshowTimer = setInterval(() => {
+      if (this._currentIndex < this._cardData.length - 1) {
+        this._navigate(1)
+      } else {
+        // Loop back to start
+        this._currentIndex = -1
+        this._navigate(1)
+      }
+    }, interval)
+  }
+
+  _stopSlideshow() {
+    if (this._slideshowTimer) {
+      clearInterval(this._slideshowTimer)
+      this._slideshowTimer = null
+    }
+    const btn = document.querySelector('.bb-tb-slideshow i')
+    if (btn) { btn.classList.remove('fa-pause'); btn.classList.add('fa-play') }
+  }
+
+  // --- Panel ---
 
   async _loadPanel(data) {
     const panelBody = document.querySelector('#bb-viewer-panel .panel-body')
@@ -171,6 +284,7 @@ class Handler {
   }
 
   _closeOverlay(silent) {
+    this._stopSlideshow()
     const overlay = document.getElementById('bb-viewer-overlay')
     if (overlay) overlay.remove()
     if (this._keyHandler && !silent) {
@@ -179,10 +293,26 @@ class Handler {
     }
   }
 
+  _togglePanel() {
+    const panel = document.getElementById('bb-viewer-panel')
+    if (!panel) return
+    panel.classList.toggle('collapsed')
+    // Update the toggle button icon
+    const btn = document.querySelector('.bb-tb-panel-toggle i')
+    if (btn) {
+      if (panel.classList.contains('collapsed')) {
+        btn.classList.remove('fa-circle-info')
+        btn.classList.add('fa-circle-info')
+        btn.style.opacity = '0.4'
+      } else {
+        btn.style.opacity = '1'
+      }
+    }
+  }
+
   // --- Panel content ---
 
   _buildPanelHTML(meta) {
-    // Tags
     let tagsHTML = ''
     if (meta.tags && meta.tags.length > 0) {
       tagsHTML = meta.tags.map(t =>
@@ -190,7 +320,6 @@ class Handler {
       ).join('')
     }
 
-    // Prompt with clickable tokens
     let promptHTML = ''
     if (meta.prompt) {
       const words = meta.prompt.split(/\s+/).filter(w => w.length > 0)
@@ -198,7 +327,6 @@ class Handler {
       promptHTML = `<div class='panel-prompt'>${tokenized}</div>`
     }
 
-    // Metadata rows with clickable values (hyperfilters)
     const stringFields = ['agent', 'model_name', 'model_hash', 'sampler', 'loras', 'subfolder', 'controlnet_module', 'controlnet_model']
     const numericFields = ['steps', 'cfg_scale', 'seed', 'input_strength', 'width', 'height', 'aesthetic_score', 'controlnet_weight', 'controlnet_guidance_strength']
     const displayFields = [
@@ -218,7 +346,6 @@ class Handler {
         } else if (numericFields.includes(key)) {
           valHTML = `<span class='panel-filter' data-filter='${key}:${meta[key]}'>${meta[key]}</span>`
         } else if (key === 'file_path') {
-          // Split path into clickable segments
           const segments = String(meta[key]).split(/[\/\\]/).filter(s => s.length > 0)
           valHTML = segments.map(s => `<span class='panel-filter' data-filter='file_path:${s}'>${s}</span>`).join('<span class="panel-sep">/</span>')
         } else if (key === 'negative_prompt') {
@@ -250,20 +377,16 @@ class Handler {
   }
 
   _attachPanelHandlers(container, meta) {
-    // Copy prompt
     const copyBtn = container.querySelector('.panel-copy-prompt')
     if (copyBtn) {
       copyBtn.addEventListener('click', (e) => {
         e.stopPropagation()
         this.api.copy(copyBtn.getAttribute('data-value'))
         copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied'
-        setTimeout(() => {
-          copyBtn.innerHTML = '<i class="fa-regular fa-clone"></i> Copy Prompt'
-        }, 2000)
+        setTimeout(() => { copyBtn.innerHTML = '<i class="fa-regular fa-clone"></i> Copy Prompt' }, 2000)
       })
     }
 
-    // Tag input
     const tagInput = container.querySelector('.panel-add-tag')
     if (tagInput) {
       tagInput.addEventListener('keydown', async (e) => {
@@ -281,15 +404,12 @@ class Handler {
           path: "user", cmd: "set",
           args: [src, { "dc:subject": [{ val, mode: "merge" }] }]
         })
-
         tagInput.value = ''
-        // Reload panel
         const data = this._cardData[this._currentIndex]
         if (data) await this._loadPanel(data)
       })
     }
 
-    // Clickable filters (hyperfilters) — navigate to search
     container.querySelectorAll('.panel-filter').forEach(el => {
       el.addEventListener('click', (e) => {
         e.stopPropagation()
@@ -313,16 +433,10 @@ class Handler {
 
     if (is_favorited) {
       if (fp) await this.api.removeImageTags([fp], ['favorite'])
-      await this.api.gm({
-        path: "user", cmd: "set",
-        args: [src, { "dc:subject": [{ val: "favorite", mode: "delete" }] }]
-      })
+      await this.api.gm({ path: "user", cmd: "set", args: [src, { "dc:subject": [{ val: "favorite", mode: "delete" }] }] })
     } else {
       if (fp) await this.api.addImageTags([fp], ['favorite'])
-      await this.api.gm({
-        path: "user", cmd: "set",
-        args: [src, { "dc:subject": [{ val: "favorite", mode: "merge" }] }]
-      })
+      await this.api.gm({ path: "user", cmd: "set", args: [src, { "dc:subject": [{ val: "favorite", mode: "merge" }] }] })
     }
 
     const newFav = !is_favorited

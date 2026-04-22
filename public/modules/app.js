@@ -106,6 +106,15 @@ class App {
 
   async init () {
     console.log("INIT", VERSION)
+
+    // Nav is position:fixed — the container scrolls from the top of the viewport
+    // behind the nav. Pad the container's content so cards start below the nav.
+    const nav = document.querySelector('nav')
+    const container = document.querySelector('.container')
+    if (nav && container) {
+      container.style.paddingTop = nav.offsetHeight + 'px'
+    }
+
     this.selector = new TomSelect("nav select#sorter", {
       onDropdownClose: () => { this.selector.blur() }
     })
