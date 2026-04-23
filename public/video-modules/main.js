@@ -13,7 +13,7 @@ class VideoApp {
     this.theme = { val: THEME || 'default' }
     this.minimal = { val: 'default' }
     this.style = { aspect_ratio: 100, fit: 'cover' }
-    this.volume = 100
+    this.volume = 50
     this._zoom = 1
     this._panX = 0
     this._panY = 0
@@ -68,7 +68,7 @@ class VideoApp {
     this.autoHideNav = autoHideRes.val === 'true' || autoHideRes.val === true
     this.confirmDelete = confirmRes.val != null ? (confirmRes.val === 'true' || confirmRes.val === true) : true
     this.style.fit = fitRes.val || 'cover'
-    this.volume = volumeRes.val != null ? parseInt(volumeRes.val) : 100
+    this.volume = volumeRes.val != null ? parseInt(volumeRes.val) : 50
     document.body.setAttribute('data-minimal', this.minimal.val)
     this.applyAutoHideNav()
     this.applyCardStyle()
@@ -767,7 +767,7 @@ class VideoApp {
   }
 
   async renderSettings(sidebar) {
-    const zoom = this.zoom || 100, minimal = this.minimal.val || 'default', theme = this.theme.val || 'default', fit = this.style.fit || 'cover', vol = this.volume != null ? this.volume : 100
+    const zoom = this.zoom || 100, minimal = this.minimal.val || 'default', theme = this.theme.val || 'default', fit = this.style.fit || 'cover', vol = this.volume != null ? this.volume : 50
     sidebar.innerHTML = `
       <div class='sb-header'><h3><i class="fa-solid fa-gear"></i> Video Settings</h3><button class='sb-close' title='Close'><i class="fa-solid fa-xmark"></i></button></div>
       <div class='sb-body'>

@@ -25,9 +25,10 @@
   min-height: 60vh;
   text-align: center;
   padding: 40px;
+  padding-top: 60px;
   opacity: 0.5;
 }
-.video-empty i {
+.video-empty > i {
   font-size: 4rem;
   margin-bottom: 20px;
 }

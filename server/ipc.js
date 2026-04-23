@@ -49,7 +49,8 @@ class IPC {
         this.ipc = config.ipc
       }
     }
-    this.theme = (config && config.theme ? config.theme : "default")
+    const savedTheme = this.imageDb ? this.imageDb.getSetting('theme') : null
+    this.theme = savedTheme || (config && config.theme ? config.theme : "default")
     this.config = config
     this.gm = this.config.gm
     if (!this.ipc) {
