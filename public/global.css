@@ -366,6 +366,12 @@ nav input {
   padding: 10px;
   box-sizing: border-box;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.grab-right {
+  margin-left: auto !important;
 }
 .card.popup-card .grab .gofullscreen, .card.popup-card .grab .popup {
   display: none;

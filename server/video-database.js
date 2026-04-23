@@ -61,6 +61,24 @@ class VideoDatabase {
         FOREIGN KEY (fingerprint) REFERENCES videos(fingerprint) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL UNIQUE,
+        added_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        val TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS trash (
+        fingerprint TEXT PRIMARY KEY,
+        original_path TEXT NOT NULL,
+        trash_path TEXT NOT NULL,
+        deleted_at INTEGER NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_videos_path ON videos(file_path);
       CREATE INDEX IF NOT EXISTS idx_videos_filename ON videos(filename);
       CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_id);
@@ -272,6 +290,214 @@ class VideoDatabase {
       dimensions.aspectRatio || null,
       fingerprint
     );
+  }
+
+  // --- Folders ---
+
+  getFolders() {
+    return this.db.prepare('SELECT * FROM folders ORDER BY added_at DESC').all();
+  }
+
+  addFolder(folderPath) {
+    const now = Date.now();
+    this.db.prepare('INSERT OR IGNORE INTO folders (path, added_at) VALUES (?, ?)').run(folderPath, now);
+  }
+
+  removeFolder(folderPath) {
+    this.db.prepare('DELETE FROM folders WHERE path = ?').run(folderPath);
+    // Remove videos from this folder
+    this.db.prepare("DELETE FROM videos WHERE file_path LIKE ? || '%'").run(folderPath);
+  }
+
+  // --- Settings ---
+
+  getSetting(key) {
+    const row = this.db.prepare('SELECT val FROM settings WHERE key = ?').get(key);
+    return row ? row.val : null;
+  }
+
+  setSetting(key, val) {
+    this.db.prepare('INSERT INTO settings (key, val) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET val = excluded.val')
+      .run(key, String(val));
+  }
+
+  // --- Search ---
+
+  search(query, options = {}) {
+    const { sort = 'created_at', direction = -1, offset = 0, limit = 500 } = options;
+
+    let where = [];
+    let params = [];
+
+    if (query && query.trim()) {
+      const tokens = query.trim().split(/\s+/);
+      for (const token of tokens) {
+        const negated = token.startsWith('-');
+        const clean = negated ? token.slice(1) : token;
+
+        // Field filters
+        const fieldMatch = clean.match(/^(\w+):(.+)$/);
+        if (fieldMatch) {
+          const [, field, value] = fieldMatch;
+          const op = negated ? 'NOT LIKE' : 'LIKE';
+
+          if (field === 'tag') {
+            const sub = negated
+              ? `fingerprint NOT IN (SELECT vt.fingerprint FROM video_tags vt JOIN tags t ON t.id = vt.tag_id WHERE t.name = ?)`
+              : `fingerprint IN (SELECT vt.fingerprint FROM video_tags vt JOIN tags t ON t.id = vt.tag_id WHERE t.name = ?)`;
+            where.push(sub);
+            params.push(value);
+          } else if (['filename', 'file_path'].includes(field)) {
+            where.push(`${field} ${op} ?`);
+            params.push(`%${value}%`);
+          } else if (['width', 'height', 'duration', 'size'].includes(field)) {
+            const numMatch = value.match(/^([><=!]+)?(\d+\.?\d*)$/);
+            if (numMatch) {
+              const [, cmp, num] = numMatch;
+              const sqlOp = cmp === '>' ? '>' : cmp === '>=' ? '>=' : cmp === '<' ? '<' : cmp === '<=' ? '<=' : '=';
+              where.push(`${field} ${sqlOp} ?`);
+              params.push(parseFloat(num));
+            }
+          }
+        } else if (clean.startsWith('before:')) {
+          const date = clean.slice(7);
+          where.push('created_at < ?');
+          params.push(new Date(date).getTime());
+        } else if (clean.startsWith('after:')) {
+          const date = clean.slice(6);
+          where.push('created_at > ?');
+          params.push(new Date(date).getTime());
+        } else {
+          // Free text — search filename
+          const op = negated ? 'NOT LIKE' : 'LIKE';
+          where.push(`filename ${op} ?`);
+          params.push(`%${clean}%`);
+        }
+      }
+    }
+
+    const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
+
+    // Sort mapping
+    const sortMap = {
+      'created_at': 'created_at', 'created': 'created_at',
+      'modified_at': 'modified_at', 'updated': 'modified_at',
+      'filename': 'filename', 'size': 'size',
+      'width': 'width', 'height': 'height', 'duration': 'duration',
+      'btime': 'created_at', 'mtime': 'modified_at',
+    };
+    const sortCol = sortMap[sort] || 'created_at';
+    const dir = direction >= 0 ? 'ASC' : 'DESC';
+
+    const countRow = this.db.prepare(`SELECT COUNT(*) as count FROM videos ${whereClause}`).get(...params);
+    const videos = this.db.prepare(
+      `SELECT * FROM videos ${whereClause} ORDER BY ${sortCol} ${dir} LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset);
+
+    // Attach tags to each video
+    const results = videos.map(v => {
+      const tags = this.getVideoTags(v.fingerprint);
+      return { ...v, tags, id: v.fingerprint };
+    });
+
+    return { total: countRow.count, results };
+  }
+
+  getCount() {
+    const row = this.db.prepare('SELECT COUNT(*) as count FROM videos').get();
+    return row.count;
+  }
+
+  // --- Soft Delete / Trash ---
+
+  softDelete(fingerprints, trashDir) {
+    const fsSync = require('fs');
+    if (!fsSync.existsSync(trashDir)) {
+      fsSync.mkdirSync(trashDir, { recursive: true });
+    }
+
+    const now = Date.now();
+    const results = [];
+
+    const transaction = this.db.transaction(() => {
+      for (const fp of fingerprints) {
+        const video = this.db.prepare('SELECT * FROM videos WHERE fingerprint = ?').get(fp);
+        if (!video) { results.push({ fingerprint: fp, success: false, error: 'not found' }); continue; }
+
+        const ext = path.extname(video.file_path);
+        const trashName = `${fp}${ext}`;
+        const trashPath = path.join(trashDir, trashName);
+
+        try {
+          try {
+            fsSync.renameSync(video.file_path, trashPath);
+          } catch (renameErr) {
+            // renameSync fails across drives (EXDEV) — fall back to copy+delete
+            fsSync.copyFileSync(video.file_path, trashPath);
+            fsSync.unlinkSync(video.file_path);
+          }
+          this.db.prepare('INSERT OR REPLACE INTO trash (fingerprint, original_path, trash_path, deleted_at) VALUES (?, ?, ?, ?)')
+            .run(fp, video.file_path, trashPath, now);
+          this.db.prepare('DELETE FROM videos WHERE fingerprint = ?').run(fp);
+          results.push({ fingerprint: fp, success: true });
+        } catch (e) {
+          results.push({ fingerprint: fp, success: false, error: e.message });
+        }
+      }
+    });
+    transaction();
+    return results;
+  }
+
+  getTrash() {
+    return this.db.prepare('SELECT * FROM trash ORDER BY deleted_at DESC').all();
+  }
+
+  restoreFromTrash(fingerprints) {
+    const fsSync = require('fs');
+    const results = [];
+
+    const transaction = this.db.transaction(() => {
+      for (const fp of fingerprints) {
+        const trashed = this.db.prepare('SELECT * FROM trash WHERE fingerprint = ?').get(fp);
+        if (!trashed) { results.push({ fingerprint: fp, success: false, error: 'not in trash' }); continue; }
+
+        try {
+          try {
+            fsSync.renameSync(trashed.trash_path, trashed.original_path);
+          } catch (renameErr) {
+            fsSync.copyFileSync(trashed.trash_path, trashed.original_path);
+            fsSync.unlinkSync(trashed.trash_path);
+          }
+          this.db.prepare('DELETE FROM trash WHERE fingerprint = ?').run(fp);
+          results.push({ fingerprint: fp, success: true });
+        } catch (e) {
+          results.push({ fingerprint: fp, success: false, error: e.message });
+        }
+      }
+    });
+    transaction();
+    return results;
+  }
+
+  emptyTrash() {
+    const fsSync = require('fs');
+    const trashed = this.db.prepare('SELECT * FROM trash').all();
+    let count = 0;
+
+    for (const item of trashed) {
+      try {
+        if (fsSync.existsSync(item.trash_path)) {
+          fsSync.unlinkSync(item.trash_path);
+        }
+        count++;
+      } catch (e) {
+        console.error('Error deleting trash file:', e);
+      }
+    }
+
+    this.db.prepare('DELETE FROM trash').run();
+    return count;
   }
 
   close() {

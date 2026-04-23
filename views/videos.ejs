@@ -22,36 +22,90 @@
         <a title="videos" class='btn active' href="/videos"><i class="fa-solid fa-video"></i></a>
         <button title='back' id='prev'><i class="fa-solid fa-chevron-left"></i></button>
         <button title='forward' id='next'><i class="fa-solid fa-chevron-right"></i></button>
+        <a id='bookmarked-filters' title="bookmarked filters" class='btn' href="/favorites"><i class="fa-solid fa-star"></i></a>
+        <a id='favorited-items' title="liked items" class='btn' href="/videos?query=tag:favorite"><i class="fa-solid fa-heart"></i></a>
+        <button title='synchronize files' id="sync"><i class="fa-solid fa-rotate"></i></button>
         <div class='right-menu'>
           <div class='flexible'></div>
           <button id='show-menu'><i class="fa-solid fa-bars"></i></button>
-          <button id='minimize' title='minimize to player mode'><i class="fa-solid fa-bars"></i></button>
         </div>
       </div>
       <div class='status'></div>
       <div class='search-box minimal'>
         <div title="total number of videos" class='content-info'></div>
         <input type='search' placeholder='search videos' class='search flexible'>
+        <button title='bookmark this search' id='favorite'><i class="fa-regular fa-star"></i></button>
+        <div class='sorter-button'>
+          <i class="nomargin fa-solid fa-arrow-down-wide-short"></i>
+          <select title='sort results' id='sorter'>
+            <option value='0'>created (↓)</option>
+            <option value='1'>created (↑)</option>
+            <option value='2'>updated (↓)</option>
+            <option value='3'>updated (↑)</option>
+            <option value='4'>filename (a-z)</option>
+            <option value='5'>filename (z-a)</option>
+            <option value='6'>width (↓)</option>
+            <option value='7'>width (↑)</option>
+            <option value='8'>duration (↓)</option>
+            <option value='9'>duration (↑)</option>
+          </select>
+        </div>
       </div>
       <div class='nav-unit nav-actions'>
-        <button id='select-folder' title="select video folder"><i class="fa-solid fa-folder-open"></i> Select Folder</button>
-        <button id='video-settings' title="video settings"><i class="fa-solid fa-sliders"></i></button>
+        <button id='folder-option' title="manage video folders"><i class="fa-solid fa-folder-open"></i></button>
         <% if (agent === "electron") { %>
           <button id='pin' title='pin the window always on top'><i class="fa-solid fa-thumbtack"></i></button>
         <% } %>
-        <a id='settings-option' title="settings" class='btn' href="/settings"><i class="fa-solid fa-gear"></i></a>
+        <button id='settings-option' title="settings"><i class="fa-solid fa-gear"></i></button>
         <a id='help-option' title="information and community" class='btn' href="/help"><i class="fa-solid fa-question"></i></a>
         <button id='new-window' title='open a new window'><i class="fa-solid fa-plus"></i></button>
       </div>
     </nav>
-    
-    <div id="video-app-root"></div>
-    
+    <div class='container'>
+      <div class='content'></div>
+      <div class='end-marker'>
+        <div class='caption'>
+          <i class="fa-solid fa-chess-board fa-bounce"></i>
+        </div>
+      </div>
+    </div>
+    <div id='settings-sidebar' class='settings-sidebar hidden'></div>
+    <footer class='hidden'>
+      <button class='selected-count'>
+        <i class="fa-regular fa-hand-pointer"></i> <span class='counter'></span> SELECTED
+      </button>
+      <div class='tag-menu'>
+        <div class='tag-menu-items hidden'>
+          <div>
+            <input type='text' id='video-add-tag-field' placeholder='add tags to selection' style='padding:6px 10px;border:1px solid rgba(128,128,128,0.3);border-radius:12px;background:transparent;color:inherit;font-size:12px;outline:none;width:200px;'>
+            <button id='save-tags'><i class="fa-solid fa-plus"></i> ADD TAG</button>
+          </div>
+        </div>
+        <button id='tag-menu'>
+          <span class='tag-menu-collapsed'>
+            <i class="fa-solid fa-tag"></i> EDIT TAGS
+          </span>
+          <span class='tag-menu-expanded hidden'>
+            <i class="fa-solid fa-angle-down"></i>
+          </span>
+        </button>
+      </div>
+      <button id='delete-selected'><i class="fa-regular fa-trash-can"></i> DELETE FILES</button>
+      <div class='flexible'></div>
+      <button id='cancel-selection'><i class="fa-solid fa-x"></i></button>
+    </footer>
     <script>
       const VERSION = "<%=version%>"
       const AGENT = "<%=agent%>"
       const THEME = "<%=theme%>"
     </script>
-    <script type="module" src="./video-modules/main.js"></script>
+    <script src="./modules/api.js"></script>
+    <script src="./socket.io.js"></script>
+    <script src='./popper.js'></script>
+    <script src='./tippy.js'></script>
+    <script src='./hotkeys.js'></script>
+    <script src="./nanobar.js"></script>
+    <script src="./ds.js"></script>
+    <script src="./video-modules/main.js"></script>
   </body>
 </html>

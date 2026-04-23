@@ -103,6 +103,36 @@ class API {
   // Status
   getStatus() { return this._get('/api/status') }
 
+  // --- Video REST API ---
+
+  searchVideos(query, options = {}) {
+    const params = new URLSearchParams()
+    if (query) params.set('q', query)
+    if (options.sort) params.set('sort', options.sort)
+    if (options.direction != null) params.set('direction', options.direction)
+    if (options.offset != null) params.set('offset', options.offset)
+    if (options.limit != null) params.set('limit', options.limit)
+    return this._get(`/api/videos/search?${params}`)
+  }
+  getVideo(fingerprint) { return this._get(`/api/videos/${fingerprint}`) }
+  getVideoCount() { return this._get('/api/videos/count') }
+
+  addVideoTags(fingerprints, tags) { return this._post('/api/videos/tags/add', { fingerprints, tags }) }
+  removeVideoTags(fingerprints, tags) { return this._post('/api/videos/tags/remove', { fingerprints, tags }) }
+  getAllVideoTags() { return this._get('/api/videos/tags/all') }
+
+  deleteVideos(fingerprints) { return this._post('/api/videos/delete', { fingerprints }) }
+  restoreVideos(fingerprints) { return this._post('/api/videos/restore', { fingerprints }) }
+  getVideoTrash() { return this._get('/api/videos/trash') }
+  emptyVideoTrash() { return this._post('/api/videos/trash/empty', {}) }
+
+  getVideoFolders() { return this._get('/api/video-folders') }
+  addVideoFolder(path) { return this._post('/api/video-folders', { path }) }
+  removeVideoFolder(path) { return this._delete('/api/video-folders', { path }) }
+
+  getVideoSetting(key) { return this._get(`/api/video-settings/${key}`) }
+  setVideoSetting(key, val) { return this._put(`/api/video-settings/${key}`, { val }) }
+
   // --- Utilities ---
 
   listen(callback) {

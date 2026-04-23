@@ -501,8 +501,7 @@ class App {
     } else {
       await this.fill(result)
       if (!this.query) {
-        document.querySelector(".empty-container").innerHTML = `Connect a folder to get started.<br><br>
-    <a href="/connect" class='btn'><i class="fa-solid fa-plug"></i> Connect</a>`
+        document.querySelector(".empty-container").innerHTML = `<div style='opacity:0.5'><i class="fa-solid fa-image" style='font-size:4rem;margin-bottom:20px'></i><h2 style='font-size:1.5rem;font-weight:normal;margin:0 0 10px'>No images loaded</h2><p style='margin:0;font-size:0.9rem'>Click the <i class="fa-solid fa-folder-open"></i> folder icon to connect an image folder</p></div>`
       }
     }
   }

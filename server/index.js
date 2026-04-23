@@ -683,6 +683,136 @@ class BreadboardServer {
       res.json({ success: true, message: 'Sync started' });
     })
 
+    // --- Video API (server-side SQLite) ---
+
+    app.get("/api/videos/search", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const query = req.query.q || '';
+      const sort = req.query.sort || 'created_at';
+      const direction = req.query.direction != null ? parseInt(req.query.direction) : -1;
+      const offset = req.query.offset != null ? parseInt(req.query.offset) : 0;
+      const limit = req.query.limit != null ? parseInt(req.query.limit) : 500;
+      try {
+        const result = this.config.videoDb.search(query, { sort, direction, offset, limit });
+        res.json(result);
+      } catch (e) {
+        console.error('Video search error:', e);
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.get("/api/videos/count", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      res.json({ count: this.config.videoDb.getCount() });
+    })
+
+    app.get("/api/videos/trash", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      res.json(this.config.videoDb.getTrash());
+    })
+
+    app.post("/api/videos/trash/empty", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const count = this.config.videoDb.emptyTrash();
+      res.json({ success: true, deleted: count });
+    })
+
+    app.get("/api/videos/tags/all", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      res.json(this.config.videoDb.getAllTags());
+    })
+
+    app.post("/api/videos/tags/add", express.json(), (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const { fingerprints, tags } = req.body;
+      if (!fingerprints || !tags) return res.status(400).json({ error: 'fingerprints and tags required' });
+      try {
+        this.config.videoDb.addTags(fingerprints, tags);
+        res.json({ success: true });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.post("/api/videos/tags/remove", express.json(), (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const { fingerprints, tags } = req.body;
+      if (!fingerprints || !tags) return res.status(400).json({ error: 'fingerprints and tags required' });
+      try {
+        for (const tag of tags) {
+          this.config.videoDb.removeTag(fingerprints, tag);
+        }
+        res.json({ success: true });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.get("/api/videos/:fingerprint", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const video = this.config.videoDb.getVideo(req.params.fingerprint);
+      if (!video) return res.status(404).json({ error: 'Video not found' });
+      res.json(video);
+    })
+
+    app.post("/api/videos/delete", express.json(), (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const { fingerprints } = req.body;
+      if (!fingerprints) return res.status(400).json({ error: 'fingerprints required' });
+      const trashDir = path.resolve(__dirname, '..', 'appdata', 'deleted_files', 'video');
+      try {
+        const results = this.config.videoDb.softDelete(fingerprints, trashDir);
+        res.json({ success: true, results });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.post("/api/videos/restore", express.json(), (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const { fingerprints } = req.body;
+      if (!fingerprints) return res.status(400).json({ error: 'fingerprints required' });
+      try {
+        const results = this.config.videoDb.restoreFromTrash(fingerprints);
+        res.json({ success: true, results });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    })
+
+    app.get("/api/video-folders", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      res.json(this.config.videoDb.getFolders());
+    })
+
+    app.post("/api/video-folders", express.json(), (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const { path: folderPath } = req.body;
+      if (!folderPath) return res.status(400).json({ error: 'path required' });
+      this.config.videoDb.addFolder(folderPath);
+      res.json({ success: true });
+    })
+
+    app.delete("/api/video-folders", express.json(), (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const { path: folderPath } = req.body;
+      if (!folderPath) return res.status(400).json({ error: 'path required' });
+      this.config.videoDb.removeFolder(folderPath);
+      res.json({ success: true });
+    })
+
+    app.get("/api/video-settings/:key", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const val = this.config.videoDb.getSetting(req.params.key);
+      res.json({ key: req.params.key, val });
+    })
+
+    app.put("/api/video-settings/:key", express.json(), (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      this.config.videoDb.setSetting(req.params.key, req.body.val);
+      res.json({ success: true });
+    })
+
     app.get("/api/status", (req, res) => {
       const imageFolders = this.config.imageDb ? this.config.imageDb.getFolders() : [];
       const imageCount = this.config.imageDb ? this.config.imageDb.getCount() : 0;
