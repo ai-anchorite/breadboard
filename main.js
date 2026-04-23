@@ -28,7 +28,8 @@ let videoWatcher = null
 function initVideoSystem() {
   try {
     videoDb = new VideoDatabase(videoDbPath)
-    videoScanner = new VideoScanner(videoDb)
+    const thumbnailDir = path.join(appDataPath, 'thumbnails', 'video')
+    videoScanner = new VideoScanner(videoDb, thumbnailDir)
     videoWatcher = new VideoWatcher(videoDb, videoScanner)
     console.log('Video system initialized')
   } catch (error) {

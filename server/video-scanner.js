@@ -13,8 +13,9 @@ const VIDEO_EXTENSIONS = [
 ];
 
 class VideoScanner {
-  constructor(database) {
+  constructor(database, thumbnailDir) {
     this.db = database;
+    this.thumbnailDir = thumbnailDir;
   }
 
   isVideoFile(filename) {
@@ -53,6 +54,29 @@ class VideoScanner {
     return null;
   }
 
+  // Generate thumbnail using ffmpeg — extract frame at ~1s mark
+  async generateThumbnail(filePath, fingerprint) {
+    if (!this.thumbnailDir) return null;
+    const fsSync = require('fs');
+    if (!fsSync.existsSync(this.thumbnailDir)) {
+      fsSync.mkdirSync(this.thumbnailDir, { recursive: true });
+    }
+    const thumbPath = path.join(this.thumbnailDir, `${fingerprint}.jpg`);
+    // Skip if thumbnail already exists
+    if (fsSync.existsSync(thumbPath)) return thumbPath;
+    try {
+      await execAsync(
+        `ffmpeg -y -i "${filePath}" -ss 0 -vframes 1 -q:v 4 "${thumbPath}"`,
+        { timeout: 15000 }
+      );
+      // Verify the file was created
+      if (fsSync.existsSync(thumbPath)) return thumbPath;
+    } catch (e) {
+      console.log('Thumbnail generation failed for:', path.basename(filePath));
+    }
+    return null;
+  }
+
   // Scan a single file
   async scanFile(filePath, stats, onProgress) {
     try {
@@ -74,6 +98,15 @@ class VideoScanner {
 
       // Index in database
       const video = await this.db.indexVideo(filePath, stats, dimensions);
+
+      // Generate thumbnail
+      if (video && video.fingerprint) {
+        const thumbPath = await this.generateThumbnail(filePath, video.fingerprint);
+        if (thumbPath) {
+          this.db.setThumbnail(video.fingerprint, thumbPath);
+          video.thumbnail_path = thumbPath;
+        }
+      }
 
       if (onProgress) {
         onProgress({ type: 'file', video });

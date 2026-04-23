@@ -395,6 +395,19 @@ class BreadboardServer {
       })
     })
     
+    // Serve video thumbnails by fingerprint
+    app.get('/thumb/video/:fingerprint', (req, res) => {
+      if (!this.config.videoDb) return res.status(503).send('Video system not initialized');
+      const video = this.config.videoDb.getVideo(req.params.fingerprint);
+      if (!video) return res.status(404).send('Video not found');
+      const thumbPath = video.thumbnail_path;
+      if (thumbPath && require('fs').existsSync(thumbPath)) {
+        res.type('image/jpeg').sendFile(thumbPath);
+      } else {
+        res.status(404).send('Thumbnail not available');
+      }
+    })
+
     // Serve video files by fingerprint
     app.get('/video/:fingerprint', (req, res) => {
       if (!this.config.videoDb) {

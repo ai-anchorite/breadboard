@@ -30,11 +30,13 @@ class VideoDatabase {
         fingerprint TEXT PRIMARY KEY,
         file_path TEXT NOT NULL,
         filename TEXT NOT NULL,
+        root_path TEXT,
         size INTEGER NOT NULL,
         width INTEGER,
         height INTEGER,
         duration REAL,
         aspect_ratio REAL,
+        thumbnail_path TEXT,
         created_at INTEGER NOT NULL,
         modified_at INTEGER NOT NULL,
         indexed_at INTEGER NOT NULL
@@ -84,6 +86,10 @@ class VideoDatabase {
       CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_id);
       CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at);
     `);
+
+    // Migrate: add columns if they don't exist (for existing databases)
+    try { this.db.exec('ALTER TABLE videos ADD COLUMN thumbnail_path TEXT'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE videos ADD COLUMN root_path TEXT'); } catch (e) { /* already exists */ }
 
     console.log('Video database initialized:', this.dbPath);
   }
@@ -290,6 +296,10 @@ class VideoDatabase {
       dimensions.aspectRatio || null,
       fingerprint
     );
+  }
+
+  setThumbnail(fingerprint, thumbnailPath) {
+    this.db.prepare('UPDATE videos SET thumbnail_path = ? WHERE fingerprint = ?').run(thumbnailPath, fingerprint);
   }
 
   // --- Folders ---

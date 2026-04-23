@@ -13,6 +13,7 @@ class VideoApp {
     this.theme = { val: THEME || 'default' }
     this.minimal = { val: 'default' }
     this.style = { aspect_ratio: 100, fit: 'cover' }
+    this.volume = 100
     this._zoom = 1
     this._panX = 0
     this._panY = 0
@@ -60,12 +61,14 @@ class VideoApp {
     const autoHideRes = await this.api.getVideoSetting('autohide_nav')
     const confirmRes = await this.api.getVideoSetting('confirm_delete')
     const fitRes = await this.api.getVideoSetting('video_fit')
+    const volumeRes = await this.api.getVideoSetting('video_volume')
     if (themeRes.val) { this.theme.val = themeRes.val; document.body.className = themeRes.val }
     if (minimalRes.val) this.minimal.val = minimalRes.val
     if (zoomRes.val) this.zoom = parseInt(zoomRes.val)
     this.autoHideNav = autoHideRes.val === 'true' || autoHideRes.val === true
     this.confirmDelete = confirmRes.val != null ? (confirmRes.val === 'true' || confirmRes.val === true) : true
     this.style.fit = fitRes.val || 'cover'
+    this.volume = volumeRes.val != null ? parseInt(volumeRes.val) : 100
     document.body.setAttribute('data-minimal', this.minimal.val)
     this.applyAutoHideNav()
     this.applyCardStyle()
@@ -363,54 +366,100 @@ class VideoApp {
     const isFav = video.tags && video.tags.includes('favorite')
     const favClass = isFav ? 'fa-solid fa-heart' : 'fa-regular fa-heart'
     const videoUrl = `/video/${video.fingerprint}`
+    const thumbUrl = `/thumb/video/${video.fingerprint}`
     const dur = video.duration ? this.formatDuration(video.duration) : ''
-    return `<div class='card video-card' data-fingerprint='${video.fingerprint}' data-src='${video.file_path}'><div class='grab'><button title='like this video' data-favorited="${isFav}" data-fingerprint="${video.fingerprint}" class='favorite-btn'><i class="${favClass}"></i></button><button title='open in explorer' data-src="${video.file_path}" class='open-file'><i class="fa-regular fa-folder-open"></i></button><button title='delete' data-fingerprint="${video.fingerprint}" class='trash-btn'><i class="fa-regular fa-trash-can"></i></button><button title='play in grid' data-fingerprint="${video.fingerprint}" class='play-lock-btn grab-right'><i class="fa-solid fa-play"></i></button><button title='pop out' data-fingerprint="${video.fingerprint}" class='popout-btn'><i class="fa-solid fa-up-right-from-square"></i></button></div><div class='video-thumb-wrap'><video data-src="${videoUrl}" preload="none" muted loop playsinline></video><div class='video-duration'>${dur}</div></div></div>`
+    const hasThumb = !!video.thumbnail_path
+    // Render <img> thumbnail by default for performance; <video> loads on hover/play-lock
+    const mediaHTML = hasThumb
+      ? `<img class='video-thumb' src="${thumbUrl}" loading="lazy" draggable="false"><video class='video-hover' data-src="${videoUrl}" preload="none" muted loop playsinline></video>`
+      : `<video class='video-fallback' data-src="${videoUrl}" preload="none" muted loop playsinline></video>`
+    return `<div class='card video-card' data-fingerprint='${video.fingerprint}' data-src='${video.file_path}' data-has-thumb='${hasThumb}'><div class='grab'><button title='like this video' data-favorited="${isFav}" data-fingerprint="${video.fingerprint}" class='favorite-btn'><i class="${favClass}"></i></button><button title='open in explorer' data-src="${video.file_path}" class='open-file'><i class="fa-regular fa-folder-open"></i></button><button title='delete' data-fingerprint="${video.fingerprint}" class='trash-btn'><i class="fa-regular fa-trash-can"></i></button><button title='play in grid' data-fingerprint="${video.fingerprint}" class='play-lock-btn grab-right'><i class="fa-solid fa-play"></i></button><button title='pop out' data-fingerprint="${video.fingerprint}" class='popout-btn'><i class="fa-solid fa-up-right-from-square"></i></button></div><div class='video-thumb-wrap'>${mediaHTML}<div class='video-duration'>${dur}</div></div></div>`
   }
 
   attachCardHandlers() {
     const content = document.querySelector('.content')
     if (!content) return
+
+    // Lazy load: for thumbnail cards, img loads via loading="lazy". For fallback cards (no thumb), load video on intersect.
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
-          const video = entry.target.querySelector('video')
-          if (video && !video.src && video.dataset.src) { video.src = video.dataset.src; video.load() }
+          const fallback = entry.target.querySelector('video.video-fallback')
+          if (fallback && !fallback.src && fallback.dataset.src) { fallback.src = fallback.dataset.src; fallback.load() }
           observer.unobserve(entry.target)
         }
       })
     }, { rootMargin: '100px' })
     content.querySelectorAll('.video-card').forEach(card => observer.observe(card))
 
-    content.addEventListener('click', async (e) => {
+    // Prevent DragSelect from selecting when clicking grab buttons — stop mousedown propagation
+    content.addEventListener('mousedown', (e) => {
+      const btn = e.target.closest('.favorite-btn, .open-file, .trash-btn, .play-lock-btn, .popout-btn')
+      if (btn) e.stopPropagation()
+    }, true)
+
+    // Click handler on .container (parent) — runs before DragSelect can interfere
+    const container = document.querySelector('.container')
+    container.addEventListener('click', async (e) => {
       const card = e.target.closest('.video-card')
       if (!card) return
+
       const favBtn = e.target.closest('.favorite-btn')
       const openBtn = e.target.closest('.open-file')
       const trashBtn = e.target.closest('.trash-btn')
       const playBtn = e.target.closest('.play-lock-btn')
       const popoutBtn = e.target.closest('.popout-btn')
       const grabArea = e.target.closest('.grab')
-      if (favBtn) await this.toggleFavorite(favBtn)
-      else if (openBtn) this.api.open(openBtn.getAttribute('data-src'))
-      else if (trashBtn) await this.trashVideo(trashBtn, card)
-      else if (playBtn) this.togglePlayLock(card)
-      else if (popoutBtn) this.popoutVideo(card)
-      else if (!grabArea) this.openViewer(card)
+
+      // Button clicks on the grab header — handle and stop propagation
+      if (favBtn) { e.preventDefault(); e.stopPropagation(); await this.toggleFavorite(favBtn) }
+      else if (openBtn) { e.preventDefault(); e.stopPropagation(); this.api.open(openBtn.getAttribute('data-src')) }
+      else if (trashBtn) { e.preventDefault(); e.stopPropagation(); await this.trashVideo(trashBtn, card) }
+      else if (playBtn) { e.preventDefault(); e.stopPropagation(); this.togglePlayLock(card) }
+      else if (popoutBtn) { e.preventDefault(); e.stopPropagation(); this.popoutVideo(card) }
+      else if (grabArea) { /* header area — let DragSelect handle selection */ }
+      else {
+        // Click on video/thumbnail area — open viewer
+        e.preventDefault(); e.stopPropagation()
+        this.openViewer(card)
+      }
     })
 
-    // Hover to preview
+    // Hover to preview — load and play video on hover, hide thumbnail
     content.addEventListener('mouseenter', (e) => {
-      const card = e.target.closest('.video-card')
+      const card = e.target.closest?.('.video-card')
       if (!card || card.classList.contains('playing-locked')) return
-      const video = card.querySelector('video')
-      if (video && video.src) video.play().catch(() => {})
+      this._startHoverPreview(card)
     }, true)
     content.addEventListener('mouseleave', (e) => {
-      const card = e.target.closest('.video-card')
+      const card = e.target.closest?.('.video-card')
       if (!card || card.classList.contains('playing-locked')) return
-      const video = card.querySelector('video')
-      if (video) { video.pause(); video.currentTime = 0 }
+      this._stopHoverPreview(card)
     }, true)
+  }
+
+  _startHoverPreview(card) {
+    const hoverVideo = card.querySelector('video.video-hover')
+    const fallbackVideo = card.querySelector('video.video-fallback')
+    const thumb = card.querySelector('img.video-thumb')
+    const video = hoverVideo || fallbackVideo
+    if (!video) return
+    // Lazy-load the hover video src
+    if (!video.src && video.dataset.src) { video.src = video.dataset.src; video.load() }
+    if (thumb) thumb.style.display = 'none'
+    if (hoverVideo) hoverVideo.style.display = 'block'
+    video.play().catch(() => {})
+  }
+
+  _stopHoverPreview(card) {
+    const hoverVideo = card.querySelector('video.video-hover')
+    const fallbackVideo = card.querySelector('video.video-fallback')
+    const thumb = card.querySelector('img.video-thumb')
+    const video = hoverVideo || fallbackVideo
+    if (!video) return
+    video.pause()
+    video.currentTime = 0
+    if (thumb) { thumb.style.display = 'block'; if (hoverVideo) hoverVideo.style.display = 'none' }
   }
 
   async toggleFavorite(btn) {
@@ -435,15 +484,24 @@ class VideoApp {
   }
 
   togglePlayLock(card) {
-    const video = card.querySelector('video')
+    const hoverVideo = card.querySelector('video.video-hover')
+    const fallbackVideo = card.querySelector('video.video-fallback')
+    const thumb = card.querySelector('img.video-thumb')
+    const video = hoverVideo || fallbackVideo
     const btn = card.querySelector('.play-lock-btn')
     if (!video) return
     if (card.classList.contains('playing-locked')) {
       card.classList.remove('playing-locked'); video.pause(); video.currentTime = 0; video.muted = true
       if (btn) btn.querySelector('i').className = 'fa-solid fa-play'
+      // Restore thumbnail
+      if (thumb) { thumb.style.display = 'block'; if (hoverVideo) hoverVideo.style.display = 'none' }
     } else {
       card.classList.add('playing-locked'); video.muted = false
-      if (video.src) video.play().catch(() => {})
+      video.volume = this.volume / 100
+      if (!video.src && video.dataset.src) { video.src = video.dataset.src; video.load() }
+      if (thumb) thumb.style.display = 'none'
+      if (hoverVideo) hoverVideo.style.display = 'block'
+      video.play().catch(() => {})
       if (btn) btn.querySelector('i').className = 'fa-solid fa-pause'
     }
   }
@@ -466,8 +524,9 @@ class VideoApp {
     const selectedIndex = allCards.indexOf(selectedCard)
     this._cardData = []
     allCards.forEach(card => {
-      const video = card.querySelector('video')
-      if (video) this._cardData.push({ fingerprint: card.getAttribute('data-fingerprint'), file_path: card.getAttribute('data-src'), videoSrc: video.src || video.dataset.src })
+      const video = card.querySelector('video.video-hover') || card.querySelector('video.video-fallback')
+      const videoSrc = video ? (video.src || video.dataset.src) : `/video/${card.getAttribute('data-fingerprint')}`
+      this._cardData.push({ fingerprint: card.getAttribute('data-fingerprint'), file_path: card.getAttribute('data-src'), videoSrc })
     })
     this._currentIndex = selectedIndex >= 0 ? selectedIndex : 0
     this._zoom = 1; this._panX = 0; this._panY = 0; this._viewerOpen = true
@@ -577,7 +636,7 @@ class VideoApp {
     const data = this._cardData[index]
     if (!data) return
     const video = document.querySelector('.bb-viewer-video')
-    if (video) { video.src = data.videoSrc; video.load(); video.play().catch(() => {}); this._applyTransform() }
+    if (video) { video.src = data.videoSrc; video.volume = this.volume / 100; video.load(); video.play().catch(() => {}); this._applyTransform() }
     const playBtn = document.querySelector('.bb-tb-play i')
     if (playBtn) { playBtn.classList.remove('fa-play'); playBtn.classList.add('fa-pause') }
     const label = `${index + 1} / ${this._cardData.length}`
@@ -674,8 +733,25 @@ class VideoApp {
     if (this._onPanEnd) { document.removeEventListener('mouseup', this._onPanEnd); this._onPanEnd = null }
     const overlay = document.getElementById('bb-viewer-overlay'); if (overlay) overlay.remove()
     if (this._keyHandler && !silent) { document.removeEventListener('keydown', this._keyHandler); this._keyHandler = null }
-    if (!silent) { const nav = document.querySelector('nav'); if (nav && !this._navWasAutoHide) { nav.classList.remove('autohide'); nav.classList.remove('force-show') } }
+    if (!silent) {
+      const nav = document.querySelector('nav'); if (nav && !this._navWasAutoHide) { nav.classList.remove('autohide'); nav.classList.remove('force-show') }
+      // Reset all play-locked videos
+      this._resetAllPlayLocks()
+    }
     this._viewerOpen = false
+  }
+
+  _resetAllPlayLocks() {
+    document.querySelectorAll('.video-card.playing-locked').forEach(card => {
+      card.classList.remove('playing-locked')
+      const video = card.querySelector('video.video-hover') || card.querySelector('video.video-fallback')
+      if (video) { video.pause(); video.currentTime = 0; video.muted = true }
+      const thumb = card.querySelector('img.video-thumb')
+      const hoverVideo = card.querySelector('video.video-hover')
+      if (thumb) { thumb.style.display = 'block'; if (hoverVideo) hoverVideo.style.display = 'none' }
+      const btn = card.querySelector('.play-lock-btn')
+      if (btn) btn.querySelector('i').className = 'fa-solid fa-play'
+    })
   }
 
   // =============================================
@@ -691,7 +767,7 @@ class VideoApp {
   }
 
   async renderSettings(sidebar) {
-    const zoom = this.zoom || 100, minimal = this.minimal.val || 'default', theme = this.theme.val || 'default', fit = this.style.fit || 'cover'
+    const zoom = this.zoom || 100, minimal = this.minimal.val || 'default', theme = this.theme.val || 'default', fit = this.style.fit || 'cover', vol = this.volume != null ? this.volume : 100
     sidebar.innerHTML = `
       <div class='sb-header'><h3><i class="fa-solid fa-gear"></i> Video Settings</h3><button class='sb-close' title='Close'><i class="fa-solid fa-xmark"></i></button></div>
       <div class='sb-body'>
@@ -699,6 +775,7 @@ class VideoApp {
         <div class='sb-section'><h4><i class="fa-solid fa-eye-slash"></i> Auto-hide Nav</h4><div class='sb-row'><label><input type='checkbox' id='sb-autohide-nav' ${this.autoHideNav ? 'checked' : ''}> Hide nav bar until hover</label></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-id-card"></i> Card Header</h4><div class='sb-row sb-minimal-row'><label><input type='radio' name='sb-minimal' value='default' ${minimal === 'default' ? 'checked' : ''}> Always</label><label><input type='radio' name='sb-minimal' value='minimal' ${minimal === 'minimal' ? 'checked' : ''}> On hover</label><label><input type='radio' name='sb-minimal' value='none' ${minimal === 'none' ? 'checked' : ''}> Hidden</label></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-magnifying-glass"></i> Card Size</h4><div class='sb-row'><span class='sb-label'>Zoom <span class='sb-val' id='sb-zoom-val'>${zoom}%</span></span><input type='range' id='sb-zoom' min='20' max='600' value='${zoom}' step='1'></div><div class='sb-row sb-fit-row'><label><input type='radio' name='sb-fit' value='contain' ${fit === 'contain' ? 'checked' : ''}> Contain</label><label><input type='radio' name='sb-fit' value='cover' ${fit === 'cover' ? 'checked' : ''}> Cover</label></div></div>
+        <div class='sb-section'><h4><i class="fa-solid fa-volume-high"></i> Playback Volume</h4><div class='sb-row'><span class='sb-label'>Volume <span class='sb-val' id='sb-vol-val'>${vol}%</span></span><input type='range' id='sb-volume' min='0' max='100' value='${vol}' step='5'></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-rotate"></i> Re-index</h4><button class='sb-btn sb-reindex'><i class="fa-solid fa-rotate"></i> Re-index from Scratch</button></div>
         <div class='sb-section'><h4><i class="fa-solid fa-trash-can"></i> Deleted Files</h4><div class='sb-row'><label><input type='checkbox' id='sb-confirm-delete' ${this.confirmDelete ? 'checked' : ''}> Ask before deleting</label></div><div class='sb-row sb-trash-info'><span class='sb-label'>Loading...</span></div><div class='sb-row sb-trash-actions' style='display:none'><button class='sb-btn sb-open-trash'><i class="fa-regular fa-folder-open"></i> Open Folder</button><button class='sb-btn sb-empty-trash' style='color:#e55'><i class="fa-solid fa-trash"></i> Empty Trash</button></div></div>
         ${AGENT === 'electron' ? `<div class='sb-section'><h4><i class="fa-solid fa-terminal"></i> Debug</h4><button class='sb-btn sb-debug'><i class="fa-solid fa-terminal"></i> Open DevTools</button></div>` : ''}
@@ -720,6 +797,13 @@ class VideoApp {
     sidebar.querySelector('#sb-zoom')?.addEventListener('input', async (e) => { const val = parseInt(e.target.value); sidebar.querySelector('#sb-zoom-val').textContent = val + '%'; await this.api.setVideoSetting('video_zoom', val); this.zoom = val; this.applyCardStyle() })
     // Fit mode
     sidebar.querySelectorAll('[name=sb-fit]').forEach(el => el.addEventListener('change', async () => { await this.api.setVideoSetting('video_fit', el.value); this.style.fit = el.value; this.applyFit() }))
+    // Volume
+    sidebar.querySelector('#sb-volume')?.addEventListener('input', async (e) => {
+      const val = parseInt(e.target.value); sidebar.querySelector('#sb-vol-val').textContent = val + '%'
+      await this.api.setVideoSetting('video_volume', val); this.volume = val
+      // Apply to all currently playing videos
+      document.querySelectorAll('.video-card.playing-locked video').forEach(v => { v.volume = val / 100 })
+    })
     // Re-index
     sidebar.querySelector('.sb-reindex')?.addEventListener('click', async () => { this.toggleSettings(); await this.scanAllFolders() })
     this._loadTrashInfo(sidebar)

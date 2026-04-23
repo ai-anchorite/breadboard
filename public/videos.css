@@ -94,7 +94,19 @@
   cursor: pointer;
   background: #000;
 }
-.video-thumb-wrap video {
+.video-thumb-wrap img.video-thumb {
+  width: 100%;
+  display: block;
+  aspect-ratio: 16/9;
+  object-fit: var(--video-fit, cover);
+}
+.video-thumb-wrap video.video-hover {
+  display: none;
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: var(--video-fit, cover);
+}
+.video-thumb-wrap video.video-fallback {
   width: 100%;
   display: block;
   aspect-ratio: 16/9;
@@ -115,16 +127,27 @@
   display: none;
 }
 
-/* Playing-locked indicator */
-.video-card.playing-locked .video-thumb-wrap::after {
+/* Playing-locked indicator — subtle green border */
+.video-card.playing-locked {
+  outline: 1px solid rgba(100, 200, 100, 0.4) !important;
+  outline-offset: -1px;
+}
+
+/* Selection highlight — overlay on top of card content */
+.video-card.ds-selected {
+  position: relative;
+}
+.video-card.ds-selected::after {
   content: '';
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  border: 2px solid #F22E2E;
+  background: rgba(100, 149, 237, 0.25);
+  border: 3px solid cornflowerblue;
   pointer-events: none;
+  z-index: 4;
 }
 
 /* --- Viewer video element --- */
