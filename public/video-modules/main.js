@@ -46,6 +46,7 @@ class VideoApp {
     }
     await this.initSettings()
     this.attachNavEvents()
+    this.initCardListeners()
     this.initFolderPanel()
     this.initTooltips()
     this.initSelection()
@@ -256,34 +257,47 @@ class VideoApp {
 
   // --- Scan Progress ---
   initScanProgress() {
-    if (!window.electronAPI?.onVideoScanProgress) return
-    window.electronAPI.onVideoScanProgress((progress) => {
-      const status = document.querySelector('.status')
-      if (progress.type === 'start') {
-        this._scanCount = 0
-        if (status) status.innerHTML = 'scanning videos...'
-        document.querySelector('#sync')?.classList.add('disabled')
-        document.querySelector('#sync i')?.classList.add('fa-spin')
-        this.bar.go(10)
-      } else if (progress.type === 'file') {
-        this._scanCount++
-        if (status) status.innerHTML = `indexing videos... ${this._scanCount}`
-        // Indeterminate progress — pulse between 10-90%
-        this.bar.go(10 + Math.min(80, this._scanCount * 0.5))
-      } else if (progress.type === 'complete') {
-        if (status) status.innerHTML = ''
-        document.querySelector('#sync')?.classList.remove('disabled')
-        document.querySelector('#sync i')?.classList.remove('fa-spin')
-        this.bar.go(100)
-        this.loadVideos()
-      } else if (progress.type === 'error') {
-        console.error('Scan error:', progress.error)
-      }
-    })
+    if (!window.electronAPI) return
+    // Guard against duplicate listeners (page reload, re-init)
+    if (this._scanListenersAttached) return
+    this._scanListenersAttached = true
 
-    // Also listen for live video additions
-    window.electronAPI.onVideoAdded?.(() => this.loadVideos())
-    window.electronAPI.onVideoRemoved?.(() => this.loadVideos())
+    if (window.electronAPI.onVideoScanProgress) {
+      window.electronAPI.onVideoScanProgress((progress) => {
+        const status = document.querySelector('.status')
+        if (progress.type === 'start') {
+          this._scanCount = 0
+          this._scanning = true
+          if (status) status.innerHTML = 'scanning videos...'
+          document.querySelector('#sync')?.classList.add('disabled')
+          document.querySelector('#sync i')?.classList.add('fa-spin')
+          this.bar.go(10)
+        } else if (progress.type === 'file') {
+          this._scanCount++
+          if (status) status.innerHTML = `indexing videos... ${this._scanCount}`
+          this.bar.go(10 + Math.min(80, this._scanCount * 0.5))
+        } else if (progress.type === 'complete') {
+          this._scanning = false
+          if (status) status.innerHTML = ''
+          document.querySelector('#sync')?.classList.remove('disabled')
+          document.querySelector('#sync i')?.classList.remove('fa-spin')
+          this.bar.go(100)
+          this.loadVideos()
+        } else if (progress.type === 'error') {
+          console.error('Scan error:', progress.error)
+        }
+      })
+    }
+
+    // Live video additions — debounce to avoid hammering during bulk watcher events
+    this._liveReloadTimer = null
+    const debouncedReload = () => {
+      if (this._scanning) return // Don't reload during active scan
+      if (this._liveReloadTimer) clearTimeout(this._liveReloadTimer)
+      this._liveReloadTimer = setTimeout(() => { this._liveReloadTimer = null; this.loadVideos() }, 2000)
+    }
+    window.electronAPI.onVideoAdded?.(debouncedReload)
+    window.electronAPI.onVideoRemoved?.(debouncedReload)
   }
 
   // --- Folder Panel ---
@@ -315,17 +329,7 @@ class VideoApp {
 
   async scanFolder(folderPath) {
     if (!window.electronAPI?.scanVideos) return
-    const status = document.querySelector('.status')
-    if (status) status.innerHTML = 'scanning videos...'
-    document.querySelector('#sync')?.classList.add('disabled')
-    document.querySelector('#sync i')?.classList.add('fa-spin')
-    this._scanCount = 0
-    this.bar.go(10)
     try { await window.electronAPI.scanVideos(folderPath, { recursive: true }) } catch (e) { console.error('Scan error:', e) }
-    if (status) status.innerHTML = ''
-    document.querySelector('#sync')?.classList.remove('disabled')
-    document.querySelector('#sync i')?.classList.remove('fa-spin')
-    this.bar.go(100)
   }
 
   async scanAllFolders() {
@@ -391,15 +395,21 @@ class VideoApp {
       })
     }, { rootMargin: '100px' })
     content.querySelectorAll('.video-card').forEach(card => observer.observe(card))
+  }
 
-    // Prevent DragSelect from selecting when clicking grab buttons — stop mousedown propagation
+  // Attach delegated event listeners ONCE (called from init, not per-render)
+  initCardListeners() {
+    const content = document.querySelector('.content')
+    const container = document.querySelector('.container')
+    if (!content || !container) return
+
+    // Prevent DragSelect from selecting when clicking grab buttons
     content.addEventListener('mousedown', (e) => {
       const btn = e.target.closest('.favorite-btn, .open-file, .trash-btn, .play-lock-btn, .popout-btn')
       if (btn) e.stopPropagation()
     }, true)
 
-    // Click handler on .container (parent) — runs before DragSelect can interfere
-    const container = document.querySelector('.container')
+    // Click handler on .container (parent)
     container.addEventListener('click', async (e) => {
       const card = e.target.closest('.video-card')
       if (!card) return
@@ -411,7 +421,6 @@ class VideoApp {
       const popoutBtn = e.target.closest('.popout-btn')
       const grabArea = e.target.closest('.grab')
 
-      // Button clicks on the grab header — handle and stop propagation
       if (favBtn) { e.preventDefault(); e.stopPropagation(); await this.toggleFavorite(favBtn) }
       else if (openBtn) { e.preventDefault(); e.stopPropagation(); this.api.open(openBtn.getAttribute('data-src')) }
       else if (trashBtn) { e.preventDefault(); e.stopPropagation(); await this.trashVideo(trashBtn, card) }
@@ -419,7 +428,6 @@ class VideoApp {
       else if (popoutBtn) { e.preventDefault(); e.stopPropagation(); this.popoutVideo(card) }
       else if (grabArea) { /* header area — let DragSelect handle selection */ }
       else {
-        // Click on video/thumbnail area — open viewer
         e.preventDefault(); e.stopPropagation()
         this.openViewer(card)
       }
@@ -734,8 +742,9 @@ class VideoApp {
     const overlay = document.getElementById('bb-viewer-overlay'); if (overlay) overlay.remove()
     if (this._keyHandler && !silent) { document.removeEventListener('keydown', this._keyHandler); this._keyHandler = null }
     if (!silent) {
-      const nav = document.querySelector('nav'); if (nav && !this._navWasAutoHide) { nav.classList.remove('autohide'); nav.classList.remove('force-show') }
-      // Reset all play-locked videos
+      // Restore nav — re-apply the full auto-hide logic to ensure clean state
+      this.applyAutoHideNav()
+      this._navWasAutoHide = undefined
       this._resetAllPlayLocks()
     }
     this._viewerOpen = false

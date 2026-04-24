@@ -213,19 +213,10 @@ app.whenReady().then(async () => {
     try {
       const videos = await videoScanner.scanDirectory(folderPath, options, (progress) => {
         // Send progress updates to renderer
-        event.sender.send('video-scan-progress', progress)
+        try { event.sender.send('video-scan-progress', progress) } catch (e) { /* window may be closed */ }
       })
 
-      // Start watching the folder
-      if (videoWatcher) {
-        videoWatcher.start(folderPath, options, {
-          onAdded: (video) => event.sender.send('video-added', video),
-          onRemoved: (filePath, fingerprint) => event.sender.send('video-removed', { filePath, fingerprint }),
-          onChanged: (video) => event.sender.send('video-changed', video),
-        })
-      }
-
-      return { success: true, videos, count: videos.length }
+      return { success: true, count: videos.length }
     } catch (error) {
       console.error('Error scanning videos:', error)
       return { success: false, error: error.message }

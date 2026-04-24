@@ -172,6 +172,11 @@ class VideoDatabase {
     return this.getVideo(video.fingerprint);
   }
 
+  // Quick check if a file is already indexed with same mtime (no tag/rating fetch)
+  getVideoStub(filePath) {
+    return this.db.prepare('SELECT fingerprint, modified_at, thumbnail_path FROM videos WHERE file_path = ?').get(filePath) || null;
+  }
+
   // Get all videos
   getAllVideos() {
     const videos = this.db.prepare('SELECT * FROM videos ORDER BY created_at DESC').all();

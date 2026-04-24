@@ -26,9 +26,9 @@ class VideoScanner {
   // Get video dimensions using ffprobe (if available) or fallback
   async getVideoDimensions(filePath) {
     try {
-      // Try ffprobe first (most accurate)
       const { stdout } = await execAsync(
-        `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -of json "${filePath}"`
+        `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -of json "${filePath}"`,
+        { timeout: 30000 }
       );
       const data = JSON.parse(stdout);
       const stream = data.streams?.[0];
@@ -39,22 +39,20 @@ class VideoScanner {
         const duration = parseFloat(stream.duration);
         
         return {
-          width,
-          height,
-          duration,
-          aspectRatio: width / height
+          width: isNaN(width) ? null : width,
+          height: isNaN(height) ? null : height,
+          duration: isNaN(duration) ? null : duration,
+          aspectRatio: (width && height) ? width / height : null
         };
       }
     } catch (error) {
-      // ffprobe not available or failed, return null
-      // Dimensions will be extracted when video loads in browser
-      console.log('ffprobe not available for:', path.basename(filePath));
+      console.log('ffprobe failed for:', path.basename(filePath), error.killed ? '(timeout)' : '');
     }
     
     return null;
   }
 
-  // Generate thumbnail using ffmpeg — extract frame at ~1s mark
+  // Generate thumbnail using ffmpeg — extract first frame
   async generateThumbnail(filePath, fingerprint) {
     if (!this.thumbnailDir) return null;
     const fsSync = require('fs');
@@ -65,14 +63,14 @@ class VideoScanner {
     // Skip if thumbnail already exists
     if (fsSync.existsSync(thumbPath)) return thumbPath;
     try {
+      // -ss before -i = input seeking (fast, doesn't decode entire file)
       await execAsync(
-        `ffmpeg -y -i "${filePath}" -ss 0 -vframes 1 -q:v 4 "${thumbPath}"`,
-        { timeout: 15000 }
+        `ffmpeg -y -ss 0 -i "${filePath}" -vframes 1 -q:v 4 "${thumbPath}"`,
+        { timeout: 30000 }
       );
-      // Verify the file was created
       if (fsSync.existsSync(thumbPath)) return thumbPath;
     } catch (e) {
-      console.log('Thumbnail generation failed for:', path.basename(filePath));
+      console.log('Thumbnail failed for:', path.basename(filePath), e.killed ? '(timeout)' : '');
     }
     return null;
   }
@@ -80,20 +78,26 @@ class VideoScanner {
   // Scan a single file
   async scanFile(filePath, stats, onProgress) {
     try {
-      // Get stats if not provided
       if (!stats) {
         stats = await fs.stat(filePath);
       }
-      
-      if (!stats.isFile()) {
-        return null;
+      if (!stats.isFile()) return null;
+      if (!this.isVideoFile(filePath)) return null;
+
+      // Check if already indexed with same mtime — skip expensive ffprobe/ffmpeg
+      const existingRow = this.db.getVideoStub(filePath);
+      if (existingRow && existingRow.modified_at === Math.floor(stats.mtimeMs)) {
+        // Already indexed and unchanged — just ensure thumbnail exists
+        if (!existingRow.thumbnail_path) {
+          const thumbPath = await this.generateThumbnail(filePath, existingRow.fingerprint);
+          if (thumbPath) this.db.setThumbnail(existingRow.fingerprint, thumbPath);
+        }
+        const video = this.db.getVideo(existingRow.fingerprint);
+        if (onProgress) onProgress({ type: 'file', video });
+        return video;
       }
 
-      if (!this.isVideoFile(filePath)) {
-        return null;
-      }
-
-      // Get dimensions (optional, can be slow)
+      // Get dimensions
       const dimensions = await this.getVideoDimensions(filePath);
 
       // Index in database
