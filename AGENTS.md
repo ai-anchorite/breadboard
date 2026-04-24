@@ -13,38 +13,54 @@ The app is pre-release and under active development. There are no existing users
 ```
 /
 ├── DESIGN.md                        ← source of truth, read this first
+├── AGENTS.md                        ← this file, session context
+├── CHANGELOG.md                     ← detailed change tracking
+├── BACKLOG.md                       ← ideas pipeline
 ├── app/                             ← the Electron application
 │   ├── main.js                      ← Electron main process
 │   ├── preload.js                   ← renderer bridge
 │   ├── server/                      ← Express + Socket.IO backend
-│   │   ├── index.js                 ← BreadboardServer class
+│   │   ├── index.js                 ← BreadboardServer class + REST API
 │   │   ├── ipc.js                   ← IPC handler registry
+│   │   ├── image-database.js        ← SQLite image library (better-sqlite3)
 │   │   ├── video-database.js        ← SQLite video library (better-sqlite3)
 │   │   ├── video-scanner.js         ← video file scanner (ffprobe)
 │   │   ├── video-watcher.js         ← Chokidar watcher for video dirs
 │   │   └── crawler/                 ← image metadata extraction
 │   │       ├── parser.js            ← universal parser, detects tool
+│   │       ├── comfyui.js           ← ComfyUI workflow JSON parser
 │   │       ├── standard.js          ← A1111, InvokeAI, NovelAI, etc.
 │   │       └── diffusionbee.js      ← DiffusionBee-specific
 │   ├── public/                      ← frontend assets
 │   │   ├── modules/                 ← image gallery JS modules
-│   │   │   ├── app.js               ← main controller
-│   │   │   ├── card.js              ← card HTML template
-│   │   │   ├── handler.js           ← click/interaction handlers
-│   │   │   ├── navbar.js            ← search, sort, filters
-│   │   │   ├── selection.js         ← multi-select
-│   │   │   └── db.js                ← IndexedDB via Dexie (being replaced)
-│   │   └── video-modules/main.js    ← video gallery controller
+│   │   │   ├── app.js               ← main controller, settings, draw loop
+│   │   │   ├── api.js               ← REST API + Socket.IO communication
+│   │   │   ├── card.js              ← card HTML template (simplified)
+│   │   │   ├── handler.js           ← viewer, pan/zoom, favorites, trash
+│   │   │   ├── navbar.js            ← search, sort, settings sidebar, folder panel
+│   │   │   ├── selection.js         ← multi-select, bulk operations
+│   │   │   └── zoomer.js            ← responsive card sizing
+│   │   ├── video-modules/main.js    ← video gallery controller (full: viewer, settings, folders, selection)
+│   │   ├── videos.css               ← video-specific styles (cards, thumbnails, selection, themes)
+│   │   └── global.css               ← all shared styles including viewer, panels, nav
 │   └── views/                       ← EJS templates
 │       ├── index.ejs                ← image gallery (route: /)
 │       ├── videos.ejs               ← video gallery (route: /videos)
-│       └── settings.ejs             ← settings (route: /settings)
+│       ├── settings.ejs             ← settings fallback page
+│       ├── connect.ejs              ← folder connection fallback page
+│       ├── favorites.ejs            ← bookmarked searches
+│       └── viewer.ejs               ← pop-out image viewer
 ├── appdata/                         ← runtime data, gitignored
-│   └── breadboard/gm/               ← XMP metadata files (per-image)
+│   ├── breadboard/
+│   │   ├── images.db                ← SQLite image database
+│   │   ├── videos.db                ← SQLite video database
+│   │   └── gm/                      ← XMP metadata files (per-image)
+│   ├── thumbnails/video/            ← cached video thumbnails (fingerprint-keyed JPEGs)
+│   └── deleted_files/               ← soft-deleted files (images flat, video/ subdirectory)
 └── videoswarm_cloned_in_for_reference/  ← reference project, do not modify
 ```
 
-**Tech stack:** Electron 39, Express, Socket.IO, Chokidar, better-sqlite3, Dexie (IndexedDB, being replaced), EJS templates, vanilla JS. No build step, no transpilation, no framework.
+**Tech stack:** Electron 39, Express, Socket.IO, Chokidar, better-sqlite3, EJS templates, vanilla JS. No build step, no transpilation, no framework. Dexie/IndexedDB fully removed.
 
 **Environment:** Pinokio ships ffmpeg and ffprobe on PATH. They are available and should be used for video work.
 
@@ -52,15 +68,23 @@ The app is pre-release and under active development. There are no existing users
 
 ## Current state snapshot
 
-The image library runs on **IndexedDB (Dexie)** — this is the next thing being replaced with SQLite. The video library already runs on **SQLite (better-sqlite3)**. The DB migration for images is the top priority in the roadmap (DESIGN.md §6 and §8.1).
+The **image library UI/UX redesign is complete**. It runs on SQLite (`better-sqlite3`) with a REST API, custom fullscreen viewer with pan/zoom/slideshow, inline settings sidebar, folder management dropdown, soft-delete with trash, and frosted glass nav/footer. Tested smooth at 22k+ images.
 
-The two libraries (image and video) are **intentionally separate** — different views, different schemas, different workflows. Do not attempt to unify them into a single view or database.
+The **video library UI/UX redesign is complete**. It now mirrors the image tab's patterns: REST API (`/api/videos/*`), custom fullscreen video viewer with pan/zoom (scroll-to-zoom-to-cursor, drag-to-pan), settings sidebar, folder management dropdown, soft-delete with trash, multi-select with bulk operations, bookmarked filters, scan progress bar. The video viewer is a standout feature — zoom and pan on playing video for examining AI-generated detail.
+
+**Video thumbnails are implemented.** ffmpeg extracts frame 0 during scan, cached to `appdata/thumbnails/video/<fingerprint>.jpg`. Cards render `<img>` thumbnails by default; `<video>` loads lazily on hover or play-lock. Already-indexed files skip ffprobe/ffmpeg on re-index (mtime check). Volume control in settings sidebar.
+
+Next up: **video generation metadata** — extracting prompts, models, and parameters from ComfyUI video nodes and sidecar JSON. After that: **metadata & search improvements**.
+
+The two libraries (image and video) are **intentionally separate** — different views, different schemas, different workflows. Do not attempt to unify them. They share global theme setting and the search query syntax.
 
 Key things that work and must not be broken:
 - Search query syntax (DESIGN.md §5) — users build workflows around this
-- Tag system — tags are written to XMP files on disk, survive re-index
-- Virtual scrolling — Clusterize.js, required for large libraries
+- Tag system — tags are written to XMP files on disk (images), survive re-index
+- Image viewer — fullscreen overlay with pan/zoom/slideshow/metadata panel
+- Video viewer — fullscreen overlay with pan/zoom/play-pause/metadata panel
 - Video hover-to-play / click-to-lock playback behavior
+- Soft-delete — images go to `appdata/deleted_files/`, videos to `appdata/deleted_files/video/`
 
 ---
 
@@ -68,7 +92,7 @@ Key things that work and must not be broken:
 
 **Privacy-first.** A user's generated images and video are personal creative work. All data stays local. No telemetry, no analytics, no external network calls except the optional GitHub update check. The Express server binds to localhost only. The agent API requires a per-session token and user-configured permission levels. Any feature that could expose files externally must be opt-in with informed consent. See DESIGN.md §9 for the full privacy principle.
 
-**Scale is a baseline requirement.** The app must handle 100k+ images and 10k+ videos. Any feature touching the data layer must be designed for this. IndexedDB is being replaced precisely because it fails at this scale.
+**Scale is a baseline requirement.** The app must handle 100k+ images and 10k+ videos. Any feature touching the data layer must be designed for this. Current direct DOM rendering works well to ~22k images; grid-aware virtualizer planned for 50k+.
 
 **The database is a cache.** Tags and metadata live on the files (XMP for images, `.json` sidecar for video). The DB is reconstructable from files at any time. Never store user data only in the DB.
 
@@ -125,19 +149,23 @@ After completing any task that adds, changes, or removes functionality, add an e
 
 | Task | Files to read first |
 |------|-------------------|
-| Add a new image metadata field | `server/crawler/parser.js`, `server/crawler/standard.js` |
+| Add a new image metadata field | `server/crawler/parser.js`, `server/crawler/standard.js`, `server/image-database.js` |
 | Change card layout or displayed fields | `app/public/modules/card.js`, `app/public/global.css` |
-| Add a search filter or sort option | `app/public/modules/navbar.js`, `app/public/worker.js` |
+| Change the image viewer | `app/public/modules/handler.js`, `app/public/global.css` |
+| Change settings sidebar | `app/public/modules/navbar.js` (renderSettings method) |
+| Change folder management panel | `app/public/modules/navbar.js` (folder_panel method) |
+| Add a search filter or sort option | `app/public/modules/navbar.js`, `app/server/image-database.js` (_parseQuery) |
 | Add a click handler or card interaction | `app/public/modules/handler.js` |
-| Add an IPC command (server↔renderer) | `app/server/ipc.js`, `app/public/modules/api.js` |
+| Add a REST API endpoint | `app/server/index.js`, `app/public/modules/api.js` |
 | Change video DB schema or queries | `app/server/video-database.js` |
+| Change video card layout or viewer | `app/public/video-modules/main.js`, `app/public/videos.css` |
+| Change video settings sidebar | `app/public/video-modules/main.js` (renderSettings method) |
+| Change video folder panel | `app/public/video-modules/main.js` (initFolderPanel method) |
 | Change video scanning or watching | `app/server/video-scanner.js`, `app/server/video-watcher.js` |
-| Change settings UI | `app/views/settings.ejs` |
 | Add a new route/view | `app/server/index.js`, `app/views/` |
 | Change Electron window behavior | `app/main.js` |
-| Understand the image DB migration | `DESIGN.md §6` |
 | Understand the full roadmap | `DESIGN.md §8` |
-| Understand the agent API design | `DESIGN.md §8.9` |
+| Understand the agent API design | `DESIGN.md §8.10` |
 
 ---
 
