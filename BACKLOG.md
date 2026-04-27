@@ -2,6 +2,17 @@
 
 > Dump ideas here as they come. No structure required. Date each entry. When an idea is promoted to a real task in DESIGN.md, remove it from here.
 
+
+
+* black 1st frame issue on display card: maybe a user control in the video viewer to set current frame as the card display frame?
+
+* need a way to reset/delete back to factory. ie delete /appdata or similar
+
+* resynchronize button on navbar repurpose to "refresh". we have a re-index from stratch button in settings, need to understand current purpose of that resync button. Refresh is useful for a button to click to clear search bar and back to the bulk view. 
+
+* update app theme to match Pinokio's.  palette, font and gold-colored accent etc.  will check for pinokio's electron style files. 
+
+* need to investigate the "live update" function.  currently a power icon on the navbar.  originally this detected changes in the linked folders and auto-updated newly added media afaik.
 ---
 
 ## Video Player Controls — Inline & Popout

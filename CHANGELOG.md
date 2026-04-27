@@ -8,6 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Video playback compatibility upgrade** — Breadboard now inspects video container/codec/fps metadata with `ffprobe`, stores playback capabilities in the video database, serves correct MIME types for natively supported files, and lazily generates cached H.264/AAC MP4 transcodes for unsupported formats such as HEVC-in-MP4, AVI, and Matroska. Search/get video API responses now expose `playback_url` and `playback_strategy`, the gallery uses those URLs for hover/viewer playback, and the pop-out viewer now resolves playback through the API with an inline error state. (`app/server/video-database.js`, `app/server/video-scanner.js`, `app/server/index.js`, `app/public/video-modules/main.js`, `app/views/video-viewer.ejs`)
+- **Video card header glass styling** — the video action/selection header now uses theme-scoped glass variables with lower-opacity overlay backgrounds, stronger blur, softer borders, and lighter shadows so hover-mode headers feel more translucent while keeping button readability. Hover-mode styling is now explicitly overridden on `.video-card` so it no longer gets stomped by the shared `.card` hover rule in `global.css`, and the hover header now uses a shared cross-theme glass tint with consistent white icons while the always-visible header remains theme-based. The structure is now ready for future user color-theming without reworking the card layout logic. (`app/public/videos.css`)
+- **BACKLOG consolidation** — all shower thoughts from `BACKLOG.md` promoted to official tasks in `DESIGN.md`. Six new/expanded roadmap sections: §8.5 (Metadata System Expansion), §8.11 (Video Player & Viewer Enhancements), §8.12 (Library Organization & Bookmark Bar), §8.13 (External Folder Management), §8.14 (Video Gallery UX Improvements), §8.15 (Cross-Cutting UX Polish). See `DESIGN.md` §8 for full task details. (`BACKLOG.md`, `DESIGN.md`)
+
 ### Added
 - **Video tab redesign** — complete rewrite of the video gallery to match the image tab's polished UX patterns:
   - **Video REST API** (`/api/videos/*` endpoints) — search, get, count, tags, soft-delete/trash, restore, folders, settings. Mirrors the image API structure. (`app/server/index.js`)
