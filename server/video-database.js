@@ -339,7 +339,7 @@ class VideoDatabase {
   // --- Search ---
 
   search(query, options = {}) {
-    const { sort = 'created_at', direction = -1, offset = 0, limit = 500 } = options;
+    const { sort = 'created_at', direction = -1, offset = 0, limit = 2500 } = options;
 
     let where = [];
     let params = [];
@@ -403,7 +403,6 @@ class VideoDatabase {
     };
     const sortCol = sortMap[sort] || 'created_at';
     const dir = direction >= 0 ? 'ASC' : 'DESC';
-
     const countRow = this.db.prepare(`SELECT COUNT(*) as count FROM videos ${whereClause}`).get(...params);
     const videos = this.db.prepare(
       `SELECT * FROM videos ${whereClause} ORDER BY ${sortCol} ${dir} LIMIT ? OFFSET ?`

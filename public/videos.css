@@ -2,6 +2,8 @@
 
 :root {
   --video-min-card: 250px;
+  --video-card-ar: 1;
+  --video-grid-cols: 4;
 }
 
 /* --- Container --- */
@@ -50,6 +52,8 @@
   position: relative;
   overflow: hidden;
   user-select: none;
+  break-inside: avoid;
+  margin-bottom: 8px;
 }
 
 .video-card .grab {
@@ -94,23 +98,24 @@
   position: relative;
   cursor: pointer;
   background: #000;
+  aspect-ratio: var(--video-card-ar);
 }
 .video-thumb-wrap img.video-thumb {
   width: 100%;
+  height: 100%;
   display: block;
-  aspect-ratio: 16/9;
   object-fit: var(--video-fit, cover);
 }
 .video-thumb-wrap video.video-hover {
   display: none;
   width: 100%;
-  aspect-ratio: 16/9;
+  height: 100%;
   object-fit: var(--video-fit, cover);
 }
 .video-thumb-wrap video.video-fallback {
   width: 100%;
+  height: 100%;
   display: block;
-  aspect-ratio: 16/9;
   object-fit: var(--video-fit, cover);
 }
 .video-duration {
@@ -191,6 +196,35 @@ body.dark[data-minimal=minimal] .video-card:hover .grab {
 }
 body.dark .video-empty {
   color: #eee;
+}
+
+/* --- Grid Layout: Masonry (column-width auto-calculates columns from card width) --- */
+.container[data-grid="masonry"] .content {
+  display: block;
+  column-width: var(--video-min-card);
+  column-gap: 8px;
+}
+.container[data-grid="masonry"] .video-card {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+/* Masonry uses per-video actual aspect ratios (from inline --card-ar), falls back to slider */
+.container[data-grid="masonry"] .video-thumb-wrap {
+  aspect-ratio: var(--card-ar, var(--video-card-ar));
+}
+
+/* --- Grid Layout: Flex (default) --- */
+.container[data-grid="flex"] .content,
+.container:not([data-grid]) .content {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* --- End marker --- */
+.end-marker .fa-chess-board {
+  opacity: 0.4;
 }
 
 /* Favorited heart */

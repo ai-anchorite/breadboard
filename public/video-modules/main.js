@@ -12,7 +12,8 @@ class VideoApp {
     this.confirmDelete = true
     this.theme = { val: THEME || 'default' }
     this.minimal = { val: 'default' }
-    this.style = { aspect_ratio: 100, fit: 'cover' }
+    this.style = { aspect_ratio: 100, fit: 'cover', grid_mode: 'flex' }
+    this.video_limit = 1000
     this.volume = 50
     this._zoom = 1
     this._panX = 0
@@ -67,6 +68,12 @@ class VideoApp {
     if (minimalRes.val) this.minimal.val = minimalRes.val
     if (zoomRes.val) this.zoom = parseInt(zoomRes.val)
     this.autoHideNav = autoHideRes.val === 'true' || autoHideRes.val === true
+    const aspectRes = await this.api.getVideoSetting('video_aspect')
+    if (aspectRes.val) this.style.aspect_ratio = parseInt(aspectRes.val)
+    const gridRes = await this.api.getVideoSetting('video_grid_mode')
+    if (gridRes.val) this.style.grid_mode = gridRes.val
+    const limitRes = await this.api.getVideoSetting('video_limit')
+    if (limitRes.val) this.video_limit = parseInt(limitRes.val)
     this.confirmDelete = confirmRes.val != null ? (confirmRes.val === 'true' || confirmRes.val === true) : true
     this.style.fit = fitRes.val || 'cover'
     this.volume = volumeRes.val != null ? parseInt(volumeRes.val) : 50
@@ -74,11 +81,20 @@ class VideoApp {
     this.applyAutoHideNav()
     this.applyCardStyle()
     this.applyFit()
+    this.applyGridMode()
   }
 
   applyCardStyle() {
     const minW = Math.max(120, Math.round(250 * this.zoom / 100))
+    const ar = (this.style.aspect_ratio || 100) / 100
     document.documentElement.style.setProperty('--video-min-card', minW + 'px')
+    document.documentElement.style.setProperty('--video-card-ar', ar)
+  }
+
+  applyGridMode() {
+    const mode = this.style.grid_mode || 'flex'
+    const container = document.querySelector('.container')
+    if (container) container.setAttribute('data-grid', mode)
   }
 
   applyFit() {
@@ -342,7 +358,7 @@ class VideoApp {
   async loadVideos() {
     const sorter = this.sorters[this.sorterCode] || this.sorters[0]
     try {
-      const result = await this.api.searchVideos(this.query, { sort: sorter.column, direction: sorter.direction, limit: 500 })
+      const result = await this.api.searchVideos(this.query, { sort: sorter.column, direction: sorter.direction, limit: this.video_limit })
       this.videos = result.results || []
       this.renderGrid()
       this.updateCount(result.total || this.videos.length)
@@ -359,11 +375,27 @@ class VideoApp {
     if (!content) return
     if (this.videos.length === 0) {
       content.innerHTML = `<div class='video-empty'><i class="fa-solid fa-video"></i><h2>No videos loaded</h2><p>Click the <i class="fa-solid fa-folder-open"></i> folder icon to connect a video folder</p></div>`
+      this._updateEndMarker()
       return
     }
     content.innerHTML = this.videos.map(v => this.createCard(v)).join('')
     this.attachCardHandlers()
     this.initDragSelect()
+    this._updateEndMarker()
+  }
+
+  _updateEndMarker() {
+    const marker = document.querySelector('.end-marker')
+    if (!marker) return
+    if (this.videos.length > 0 && !this._scanning) {
+      marker.style.display = ''
+      const icon = marker.querySelector('.fa-chess-board')
+      if (icon) icon.classList.remove('fa-bounce')
+    } else if (this.videos.length === 0 && !this._scanning) {
+      marker.style.display = 'none'
+    } else {
+      marker.style.display = ''
+    }
   }
 
   createCard(video) {
@@ -373,11 +405,14 @@ class VideoApp {
     const thumbUrl = `/thumb/video/${video.fingerprint}`
     const dur = video.duration ? this.formatDuration(video.duration) : ''
     const hasThumb = !!video.thumbnail_path
+    // Per-video actual aspect ratio for masonry mode (falls back to slider value)
+    const ar = video.aspect_ratio || (video.width && video.height ? video.width / video.height : null)
+    const arStyle = ar ? `--card-ar:${ar};` : ''
     // Render <img> thumbnail by default for performance; <video> loads on hover/play-lock
     const mediaHTML = hasThumb
       ? `<img class='video-thumb' src="${thumbUrl}" loading="lazy" draggable="false"><video class='video-hover' data-src="${videoUrl}" preload="none" muted loop playsinline></video>`
       : `<video class='video-fallback' data-src="${videoUrl}" preload="none" muted loop playsinline></video>`
-    return `<div class='card video-card' data-fingerprint='${video.fingerprint}' data-src='${video.file_path}' data-has-thumb='${hasThumb}'><div class='grab'><button title='like this video' data-favorited="${isFav}" data-fingerprint="${video.fingerprint}" class='favorite-btn'><i class="${favClass}"></i></button><button title='open in explorer' data-src="${video.file_path}" class='open-file'><i class="fa-regular fa-folder-open"></i></button><button title='delete' data-fingerprint="${video.fingerprint}" class='trash-btn'><i class="fa-regular fa-trash-can"></i></button><button title='play in grid' data-fingerprint="${video.fingerprint}" class='play-lock-btn grab-right'><i class="fa-solid fa-play"></i></button><button title='pop out' data-fingerprint="${video.fingerprint}" class='popout-btn'><i class="fa-solid fa-up-right-from-square"></i></button></div><div class='video-thumb-wrap'>${mediaHTML}<div class='video-duration'>${dur}</div></div></div>`
+    return `<div class='card video-card' data-fingerprint='${video.fingerprint}' data-src='${video.file_path}' data-has-thumb='${hasThumb}' style='${arStyle}'><div class='grab'><button title='like this video' data-favorited="${isFav}" data-fingerprint="${video.fingerprint}" class='favorite-btn'><i class="${favClass}"></i></button><button title='open in explorer' data-src="${video.file_path}" class='open-file'><i class="fa-regular fa-folder-open"></i></button><button title='delete' data-fingerprint="${video.fingerprint}" class='trash-btn'><i class="fa-regular fa-trash-can"></i></button><button title='play in grid' data-fingerprint="${video.fingerprint}" class='play-lock-btn grab-right'><i class="fa-solid fa-play"></i></button><button title='pop out' data-fingerprint="${video.fingerprint}" class='popout-btn'><i class="fa-solid fa-up-right-from-square"></i></button></div><div class='video-thumb-wrap'>${mediaHTML}<div class='video-duration'>${dur}</div></div></div>`
   }
 
   attachCardHandlers() {
@@ -776,14 +811,16 @@ class VideoApp {
   }
 
   async renderSettings(sidebar) {
-    const zoom = this.zoom || 100, minimal = this.minimal.val || 'default', theme = this.theme.val || 'default', fit = this.style.fit || 'cover', vol = this.volume != null ? this.volume : 50
+    const zoom = this.zoom || 100, minimal = this.minimal.val || 'default', theme = this.theme.val || 'default', fit = this.style.fit || 'cover', vol = this.volume != null ? this.volume : 50, gridMode = this.style.grid_mode || 'flex', aspect = this.style.aspect_ratio || 100, vidLimit = this.video_limit || 1000
     sidebar.innerHTML = `
       <div class='sb-header'><h3><i class="fa-solid fa-gear"></i> Video Settings</h3><button class='sb-close' title='Close'><i class="fa-solid fa-xmark"></i></button></div>
       <div class='sb-body'>
         <div class='sb-section'><h4><i class="fa-solid fa-palette"></i> Theme</h4><div class='sb-row sb-theme-row'><button class='sb-btn ${theme === "dark" ? "active" : ""}' data-theme='dark'><i class="fa-solid fa-moon"></i> Dark</button><button class='sb-btn ${theme === "default" ? "active" : ""}' data-theme='default'><i class="fa-regular fa-sun"></i> Light</button></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-eye-slash"></i> Auto-hide Nav</h4><div class='sb-row'><label><input type='checkbox' id='sb-autohide-nav' ${this.autoHideNav ? 'checked' : ''}> Hide nav bar until hover</label></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-id-card"></i> Card Header</h4><div class='sb-row sb-minimal-row'><label><input type='radio' name='sb-minimal' value='default' ${minimal === 'default' ? 'checked' : ''}> Always</label><label><input type='radio' name='sb-minimal' value='minimal' ${minimal === 'minimal' ? 'checked' : ''}> On hover</label><label><input type='radio' name='sb-minimal' value='none' ${minimal === 'none' ? 'checked' : ''}> Hidden</label></div></div>
-        <div class='sb-section'><h4><i class="fa-solid fa-magnifying-glass"></i> Card Size</h4><div class='sb-row'><span class='sb-label'>Zoom <span class='sb-val' id='sb-zoom-val'>${zoom}%</span></span><input type='range' id='sb-zoom' min='20' max='600' value='${zoom}' step='1'></div><div class='sb-row sb-fit-row'><label><input type='radio' name='sb-fit' value='contain' ${fit === 'contain' ? 'checked' : ''}> Contain</label><label><input type='radio' name='sb-fit' value='cover' ${fit === 'cover' ? 'checked' : ''}> Cover</label></div></div>
+        <div class='sb-section'><h4><i class="fa-solid fa-magnifying-glass"></i> Card Size</h4><div class='sb-row'><span class='sb-label'>Width <span class='sb-val' id='sb-zoom-val'>${zoom}%</span></span><input type='range' id='sb-zoom' min='20' max='600' value='${zoom}' step='1'></div><div class='sb-row'><span class='sb-label'>Aspect <span class='sb-val' id='sb-aspect-val'>${aspect}%</span></span><input type='range' id='sb-aspect' min='40' max='250' value='${aspect}' step='1'></div><div class='sb-row sb-fit-row'><label><input type='radio' name='sb-fit' value='contain' ${fit === 'contain' ? 'checked' : ''}> Contain</label><label><input type='radio' name='sb-fit' value='cover' ${fit === 'cover' ? 'checked' : ''}> Cover</label></div></div>
+        <div class='sb-section'><h4><i class="fa-solid fa-border-all"></i> Grid Layout</h4><div class='sb-row sb-grid-row'><label><input type='radio' name='sb-grid-mode' value='flex' ${gridMode === 'flex' ? 'checked' : ''}> Flex Grid</label><label><input type='radio' name='sb-grid-mode' value='masonry' ${gridMode === 'masonry' ? 'checked' : ''}> Masonry</label></div></div>
+        <div class='sb-section'><h4><i class="fa-solid fa-list-ol"></i> Video Limit</h4><div class='sb-row'><span class='sb-label'>Show <span class='sb-val' id='sb-limit-val'>${vidLimit}</span> videos</span><input type='range' id='sb-limit' min='500' max='3000' value='${vidLimit}' step='500'></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-volume-high"></i> Playback Volume</h4><div class='sb-row'><span class='sb-label'>Volume <span class='sb-val' id='sb-vol-val'>${vol}%</span></span><input type='range' id='sb-volume' min='0' max='100' value='${vol}' step='5'></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-rotate"></i> Re-index</h4><button class='sb-btn sb-reindex'><i class="fa-solid fa-rotate"></i> Re-index from Scratch</button></div>
         <div class='sb-section'><h4><i class="fa-solid fa-trash-can"></i> Deleted Files</h4><div class='sb-row'><label><input type='checkbox' id='sb-confirm-delete' ${this.confirmDelete ? 'checked' : ''}> Ask before deleting</label></div><div class='sb-row sb-trash-info'><span class='sb-label'>Loading...</span></div><div class='sb-row sb-trash-actions' style='display:none'><button class='sb-btn sb-open-trash'><i class="fa-regular fa-folder-open"></i> Open Folder</button><button class='sb-btn sb-empty-trash' style='color:#e55'><i class="fa-solid fa-trash"></i> Empty Trash</button></div></div>
@@ -804,8 +841,15 @@ class VideoApp {
     sidebar.querySelector('#sb-confirm-delete')?.addEventListener('change', async (e) => { this.confirmDelete = e.target.checked; await this.api.setVideoSetting('confirm_delete', e.target.checked) })
     sidebar.querySelectorAll('[name=sb-minimal]').forEach(el => el.addEventListener('change', async () => { await this.api.setVideoSetting('minimal', el.value); this.minimal.val = el.value; document.body.setAttribute('data-minimal', el.value) }))
     sidebar.querySelector('#sb-zoom')?.addEventListener('input', async (e) => { const val = parseInt(e.target.value); sidebar.querySelector('#sb-zoom-val').textContent = val + '%'; await this.api.setVideoSetting('video_zoom', val); this.zoom = val; this.applyCardStyle() })
+    // Aspect ratio
+    sidebar.querySelector('#sb-aspect')?.addEventListener('input', async (e) => { const val = parseInt(e.target.value); sidebar.querySelector('#sb-aspect-val').textContent = val + '%'; await this.api.setVideoSetting('video_aspect', val); this.style.aspect_ratio = val; this.applyCardStyle() })
     // Fit mode
     sidebar.querySelectorAll('[name=sb-fit]').forEach(el => el.addEventListener('change', async () => { await this.api.setVideoSetting('video_fit', el.value); this.style.fit = el.value; this.applyFit() }))
+    // Grid mode
+    sidebar.querySelectorAll('[name=sb-grid-mode]').forEach(el => el.addEventListener('change', async () => { await this.api.setVideoSetting('video_grid_mode', el.value); this.style.grid_mode = el.value; this.applyGridMode() }))
+    // Video limit
+    sidebar.querySelector('#sb-limit')?.addEventListener('input', async (e) => { const val = parseInt(e.target.value); sidebar.querySelector('#sb-limit-val').textContent = val; await this.api.setVideoSetting('video_limit', val); this.video_limit = val })
+    sidebar.querySelector('#sb-limit')?.addEventListener('change', async () => { await this.loadVideos() })
     // Volume
     sidebar.querySelector('#sb-volume')?.addEventListener('input', async (e) => {
       const val = parseInt(e.target.value); sidebar.querySelector('#sb-vol-val').textContent = val + '%'
