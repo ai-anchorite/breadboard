@@ -12,6 +12,19 @@ const VIDEO_EXTENSIONS = [
   '.m4v', '.flv', '.wmv', '.3gp', '.ogv'
 ];
 
+const MIME_TYPES = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.ogv': 'video/ogg',
+  '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
+  '.flv': 'video/x-flv',
+  '.wmv': 'video/x-ms-wmv',
+  '.3gp': 'video/3gpp'
+};
+
 class VideoScanner {
   constructor(database, thumbnailDir) {
     this.db = database;
@@ -23,26 +36,68 @@ class VideoScanner {
     return VIDEO_EXTENSIONS.includes(ext);
   }
 
-  // Get video dimensions using ffprobe (if available) or fallback
-  async getVideoDimensions(filePath) {
+  inferPlaybackStrategy(filePath, metadata = {}) {
+    const ext = path.extname(filePath).toLowerCase();
+    const videoCodec = (metadata.videoCodec || '').toLowerCase();
+    const formatName = (metadata.formatName || '').toLowerCase();
+
+    const isMp4Family = ['.mp4', '.m4v', '.mov'].includes(ext) || /(mp4|mov|isom|quicktime)/.test(formatName);
+    const isWebm = ext === '.webm' || /webm/.test(formatName);
+    const isOgg = ext === '.ogv' || /ogg/.test(formatName);
+
+    if (isMp4Family && ['h264', 'avc1'].includes(videoCodec)) return 'direct';
+    if (isWebm && ['vp8', 'vp9', 'av1'].includes(videoCodec)) return 'direct';
+    if (isOgg && ['theora'].includes(videoCodec)) return 'direct';
+
+    return 'transcode';
+  }
+
+  parseFrameRate(rate) {
+    if (!rate || typeof rate !== 'string') return null;
+    const parts = rate.split('/');
+    if (parts.length === 2) {
+      const numerator = parseFloat(parts[0]);
+      const denominator = parseFloat(parts[1]);
+      if (!isNaN(numerator) && !isNaN(denominator) && denominator !== 0) {
+        return numerator / denominator;
+      }
+    }
+    const fallback = parseFloat(rate);
+    return isNaN(fallback) ? null : fallback;
+  }
+
+  // Get video metadata using ffprobe (if available) or fallback
+  async getVideoMetadata(filePath) {
     try {
       const { stdout } = await execAsync(
-        `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -of json "${filePath}"`,
+        `ffprobe -v error -show_entries format=format_name,duration:stream=index,codec_type,codec_name,width,height,duration,r_frame_rate -of json "${filePath}"`,
         { timeout: 30000 }
       );
       const data = JSON.parse(stdout);
-      const stream = data.streams?.[0];
+      const videoStream = data.streams?.find((stream) => stream.codec_type === 'video');
+      const audioStream = data.streams?.find((stream) => stream.codec_type === 'audio');
       
-      if (stream) {
-        const width = parseInt(stream.width);
-        const height = parseInt(stream.height);
-        const duration = parseFloat(stream.duration);
+      if (videoStream) {
+        const width = parseInt(videoStream.width);
+        const height = parseInt(videoStream.height);
+        const duration = parseFloat(videoStream.duration || data.format?.duration);
+        const formatName = data.format?.format_name || null;
+        const mimeType = MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+        const videoCodec = videoStream.codec_name || null;
+        const audioCodec = audioStream?.codec_name || null;
+        const fps = this.parseFrameRate(videoStream.r_frame_rate);
         
         return {
           width: isNaN(width) ? null : width,
           height: isNaN(height) ? null : height,
           duration: isNaN(duration) ? null : duration,
-          aspectRatio: (width && height) ? width / height : null
+          fps: fps && !isNaN(fps) ? fps : null,
+          aspectRatio: (width && height) ? width / height : null,
+          formatName,
+          mimeType,
+          videoCodec,
+          audioCodec,
+          playbackStrategy: this.inferPlaybackStrategy(filePath, { videoCodec, formatName })
         };
       }
     } catch (error) {
@@ -86,7 +141,8 @@ class VideoScanner {
 
       // Check if already indexed with same mtime — skip expensive ffprobe/ffmpeg
       const existingRow = this.db.getVideoStub(filePath);
-      if (existingRow && existingRow.modified_at === Math.floor(stats.mtimeMs)) {
+      const hasPlaybackMetadata = existingRow && existingRow.playback_strategy && existingRow.mime_type && (existingRow.video_codec || existingRow.format_name);
+      if (existingRow && existingRow.modified_at === Math.floor(stats.mtimeMs) && hasPlaybackMetadata) {
         // Already indexed and unchanged — just ensure thumbnail exists
         if (!existingRow.thumbnail_path) {
           const thumbPath = await this.generateThumbnail(filePath, existingRow.fingerprint);
@@ -98,7 +154,7 @@ class VideoScanner {
       }
 
       // Get dimensions
-      const dimensions = await this.getVideoDimensions(filePath);
+      const dimensions = await this.getVideoMetadata(filePath);
 
       // Index in database
       const video = await this.db.indexVideo(filePath, stats, dimensions);

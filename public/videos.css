@@ -4,6 +4,14 @@
   --video-min-card: 250px;
   --video-card-ar: 1;
   --video-grid-cols: 4;
+  --video-header-bg: rgba(255,255,255,0.72);
+  --video-header-border: rgba(255,255,255,0.36);
+  --video-header-shadow: 0 10px 24px rgba(0,0,0,0.12);
+  --video-header-hover-bg: rgba(176,206,240,0.16);
+  --video-header-hover-border: rgba(214,232,255,0.18);
+  --video-header-hover-shadow: 0 6px 16px rgba(26,42,71,0.14);
+  --video-header-blur: blur(6px) saturate(125%);
+  --video-header-hover-icon: rgba(255,255,255,0.92);
 }
 
 /* --- Container --- */
@@ -62,6 +70,13 @@
   display: flex;
   align-items: center;
   gap: 2px;
+  position: relative;
+  background: var(--video-header-bg);
+  border-bottom: 1px solid var(--video-header-border);
+  box-shadow: var(--video-header-shadow);
+  backdrop-filter: var(--video-header-blur);
+  -webkit-backdrop-filter: var(--video-header-blur);
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
 }
 .video-card .grab button {
   padding: 4px 6px !important;
@@ -88,6 +103,15 @@
   left: 0;
   right: 0;
   z-index: 5;
+  background: var(--video-header-hover-bg);
+  border-bottom-color: var(--video-header-hover-border);
+  box-shadow: var(--video-header-hover-shadow);
+  backdrop-filter: var(--video-header-blur);
+  -webkit-backdrop-filter: var(--video-header-blur);
+}
+[data-minimal=minimal] .video-card:hover .grab button {
+  color: var(--video-header-hover-icon) !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.45) !important;
 }
 [data-minimal=none] .video-card .grab {
   display: none;
@@ -174,12 +198,23 @@ body.default .video-card {
 }
 body.default .video-card .grab button {
   color: rgba(0,0,0,0.9);
+  text-shadow: 0 1px 1px rgba(255,255,255,0.35);
 }
-body.default[data-minimal=minimal] .video-card:hover .grab {
-  background: rgba(255,255,255,0.85);
+body.default {
+  --video-header-bg: rgba(255,255,255,0.78);
+  --video-header-border: rgba(255,255,255,0.42);
+  --video-header-shadow: 0 10px 24px rgba(0,0,0,0.10);
 }
 body.default .video-empty {
   color: #111;
+}
+
+body.default[data-minimal='minimal'] .video-card:hover .grab {
+  background: var(--video-header-hover-bg) !important;
+  border-bottom-color: var(--video-header-hover-border) !important;
+  box-shadow: var(--video-header-hover-shadow) !important;
+  backdrop-filter: var(--video-header-blur) !important;
+  -webkit-backdrop-filter: var(--video-header-blur) !important;
 }
 
 /* --- Theme: Dark --- */
@@ -190,12 +225,23 @@ body.dark .video-card {
 }
 body.dark .video-card .grab button {
   color: rgba(255,255,255,0.9);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.45);
 }
-body.dark[data-minimal=minimal] .video-card:hover .grab {
-  background: rgba(0,0,0,0.85);
+body.dark {
+  --video-header-bg: rgba(18,18,18,0.68);
+  --video-header-border: rgba(255,255,255,0.10);
+  --video-header-shadow: 0 12px 26px rgba(0,0,0,0.32);
 }
 body.dark .video-empty {
   color: #eee;
+}
+
+body.dark[data-minimal='minimal'] .video-card:hover .grab {
+  background: var(--video-header-hover-bg) !important;
+  border-bottom-color: var(--video-header-hover-border) !important;
+  box-shadow: var(--video-header-hover-shadow) !important;
+  backdrop-filter: var(--video-header-blur) !important;
+  -webkit-backdrop-filter: var(--video-header-blur) !important;
 }
 
 /* --- Grid Layout: Masonry (column-width auto-calculates columns from card width) --- */

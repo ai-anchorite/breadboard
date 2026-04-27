@@ -401,7 +401,7 @@ class VideoApp {
   createCard(video) {
     const isFav = video.tags && video.tags.includes('favorite')
     const favClass = isFav ? 'fa-solid fa-heart' : 'fa-regular fa-heart'
-    const videoUrl = `/video/${video.fingerprint}`
+    const videoUrl = video.playback_url || `/video/${video.fingerprint}`
     const thumbUrl = `/thumb/video/${video.fingerprint}`
     const dur = video.duration ? this.formatDuration(video.duration) : ''
     const hasThumb = !!video.thumbnail_path
@@ -412,7 +412,7 @@ class VideoApp {
     const mediaHTML = hasThumb
       ? `<img class='video-thumb' src="${thumbUrl}" loading="lazy" draggable="false"><video class='video-hover' data-src="${videoUrl}" preload="none" muted loop playsinline></video>`
       : `<video class='video-fallback' data-src="${videoUrl}" preload="none" muted loop playsinline></video>`
-    return `<div class='card video-card' data-fingerprint='${video.fingerprint}' data-src='${video.file_path}' data-has-thumb='${hasThumb}' style='${arStyle}'><div class='grab'><button title='like this video' data-favorited="${isFav}" data-fingerprint="${video.fingerprint}" class='favorite-btn'><i class="${favClass}"></i></button><button title='open in explorer' data-src="${video.file_path}" class='open-file'><i class="fa-regular fa-folder-open"></i></button><button title='delete' data-fingerprint="${video.fingerprint}" class='trash-btn'><i class="fa-regular fa-trash-can"></i></button><button title='play in grid' data-fingerprint="${video.fingerprint}" class='play-lock-btn grab-right'><i class="fa-solid fa-play"></i></button><button title='pop out' data-fingerprint="${video.fingerprint}" class='popout-btn'><i class="fa-solid fa-up-right-from-square"></i></button></div><div class='video-thumb-wrap'>${mediaHTML}<div class='video-duration'>${dur}</div></div></div>`
+    return `<div class='card video-card' data-fingerprint='${video.fingerprint}' data-src='${video.file_path}' data-playback-url='${videoUrl}' data-has-thumb='${hasThumb}' style='${arStyle}'><div class='grab'><button title='like this video' data-favorited="${isFav}" data-fingerprint="${video.fingerprint}" class='favorite-btn'><i class="${favClass}"></i></button><button title='open in explorer' data-src="${video.file_path}" class='open-file'><i class="fa-regular fa-folder-open"></i></button><button title='delete' data-fingerprint="${video.fingerprint}" class='trash-btn'><i class="fa-regular fa-trash-can"></i></button><button title='play in grid' data-fingerprint="${video.fingerprint}" class='play-lock-btn grab-right'><i class="fa-solid fa-play"></i></button><button title='pop out' data-fingerprint="${video.fingerprint}" class='popout-btn'><i class="fa-solid fa-up-right-from-square"></i></button></div><div class='video-thumb-wrap'>${mediaHTML}<div class='video-duration'>${dur}</div></div></div>`
   }
 
   attachCardHandlers() {
@@ -568,7 +568,7 @@ class VideoApp {
     this._cardData = []
     allCards.forEach(card => {
       const video = card.querySelector('video.video-hover') || card.querySelector('video.video-fallback')
-      const videoSrc = video ? (video.src || video.dataset.src) : `/video/${card.getAttribute('data-fingerprint')}`
+      const videoSrc = video ? (video.src || video.dataset.src) : (card.getAttribute('data-playback-url') || `/video/${card.getAttribute('data-fingerprint')}`)
       this._cardData.push({ fingerprint: card.getAttribute('data-fingerprint'), file_path: card.getAttribute('data-src'), videoSrc })
     })
     this._currentIndex = selectedIndex >= 0 ? selectedIndex : 0

@@ -35,7 +35,13 @@ class VideoDatabase {
         width INTEGER,
         height INTEGER,
         duration REAL,
+        fps REAL,
         aspect_ratio REAL,
+        format_name TEXT,
+        mime_type TEXT,
+        video_codec TEXT,
+        audio_codec TEXT,
+        playback_strategy TEXT,
         thumbnail_path TEXT,
         created_at INTEGER NOT NULL,
         modified_at INTEGER NOT NULL,
@@ -90,6 +96,12 @@ class VideoDatabase {
     // Migrate: add columns if they don't exist (for existing databases)
     try { this.db.exec('ALTER TABLE videos ADD COLUMN thumbnail_path TEXT'); } catch (e) { /* already exists */ }
     try { this.db.exec('ALTER TABLE videos ADD COLUMN root_path TEXT'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE videos ADD COLUMN fps REAL'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE videos ADD COLUMN format_name TEXT'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE videos ADD COLUMN mime_type TEXT'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE videos ADD COLUMN video_codec TEXT'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE videos ADD COLUMN audio_codec TEXT'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE videos ADD COLUMN playback_strategy TEXT'); } catch (e) { /* already exists */ }
 
     console.log('Video database initialized:', this.dbPath);
   }
@@ -119,8 +131,10 @@ class VideoDatabase {
     const stmt = this.db.prepare(`
       INSERT INTO videos (
         fingerprint, file_path, filename, size, width, height, 
-        duration, aspect_ratio, created_at, modified_at, indexed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        duration, fps, aspect_ratio, format_name, mime_type,
+        video_codec, audio_codec, playback_strategy,
+        created_at, modified_at, indexed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(fingerprint) DO UPDATE SET
         file_path = excluded.file_path,
         filename = excluded.filename,
@@ -129,7 +143,13 @@ class VideoDatabase {
         width = COALESCE(excluded.width, videos.width),
         height = COALESCE(excluded.height, videos.height),
         duration = COALESCE(excluded.duration, videos.duration),
-        aspect_ratio = COALESCE(excluded.aspect_ratio, videos.aspect_ratio)
+        fps = COALESCE(excluded.fps, videos.fps),
+        aspect_ratio = COALESCE(excluded.aspect_ratio, videos.aspect_ratio),
+        format_name = COALESCE(excluded.format_name, videos.format_name),
+        mime_type = COALESCE(excluded.mime_type, videos.mime_type),
+        video_codec = COALESCE(excluded.video_codec, videos.video_codec),
+        audio_codec = COALESCE(excluded.audio_codec, videos.audio_codec),
+        playback_strategy = COALESCE(excluded.playback_strategy, videos.playback_strategy)
     `);
 
     stmt.run(
@@ -140,7 +160,13 @@ class VideoDatabase {
       dimensions?.width || null,
       dimensions?.height || null,
       dimensions?.duration || null,
+      dimensions?.fps || null,
       dimensions?.aspectRatio || null,
+      dimensions?.formatName || null,
+      dimensions?.mimeType || null,
+      dimensions?.videoCodec || null,
+      dimensions?.audioCodec || null,
+      dimensions?.playbackStrategy || null,
       Math.floor(stats.birthtimeMs || stats.ctimeMs),
       Math.floor(stats.mtimeMs),
       now
@@ -174,7 +200,7 @@ class VideoDatabase {
 
   // Quick check if a file is already indexed with same mtime (no tag/rating fetch)
   getVideoStub(filePath) {
-    return this.db.prepare('SELECT fingerprint, modified_at, thumbnail_path FROM videos WHERE file_path = ?').get(filePath) || null;
+    return this.db.prepare('SELECT fingerprint, modified_at, thumbnail_path, playback_strategy, mime_type, video_codec, format_name FROM videos WHERE file_path = ?').get(filePath) || null;
   }
 
   // Get all videos
@@ -292,13 +318,20 @@ class VideoDatabase {
   updateDimensions(fingerprint, dimensions) {
     this.db.prepare(`
       UPDATE videos 
-      SET width = ?, height = ?, duration = ?, aspect_ratio = ?
+      SET width = ?, height = ?, duration = ?, fps = ?, aspect_ratio = ?,
+          format_name = ?, mime_type = ?, video_codec = ?, audio_codec = ?, playback_strategy = ?
       WHERE fingerprint = ?
     `).run(
       dimensions.width || null,
       dimensions.height || null,
       dimensions.duration || null,
+      dimensions.fps || null,
       dimensions.aspectRatio || null,
+      dimensions.formatName || null,
+      dimensions.mimeType || null,
+      dimensions.videoCodec || null,
+      dimensions.audioCodec || null,
+      dimensions.playbackStrategy || null,
       fingerprint
     );
   }

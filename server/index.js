@@ -10,11 +10,27 @@ const yaml = require('js-yaml');
 const Watcher = require('watcher');
 const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
+const { spawn } = require('child_process');
 const BasicAuth = require('./basicauth')
 const IPC = require('./ipc')
 const Diffusionbee = require('./crawler/diffusionbee')
 const Standard = require('./crawler/standard')
 const GM = require("gmgm")
+
+const VIDEO_MIME_TYPES = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.ogv': 'video/ogg',
+  '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
+  '.flv': 'video/x-flv',
+  '.wmv': 'video/x-ms-wmv',
+  '.3gp': 'video/3gpp'
+}
+
+const VIDEO_TRANSCODE_TIMEOUT_MS = 5 * 60 * 1000
 
 class BreadboardServer {
   ipc = {}
@@ -47,6 +63,8 @@ class BreadboardServer {
     // Use local appdata directory instead of user home
     const appRoot = path.resolve(__dirname, '..')
     this.home = path.resolve(appRoot, 'appdata', 'breadboard')
+    this.videoTranscodeDir = path.resolve(appRoot, 'appdata', 'transcodes', 'video')
+    this.videoTranscodeJobs = new Map()
 
     this.config.gm = {
       user: new GM({
@@ -208,6 +226,165 @@ class BreadboardServer {
     
     res.cookie('session', session)
     return session
+  }
+
+  inferVideoMimeType(filePath) {
+    return VIDEO_MIME_TYPES[path.extname(filePath || '').toLowerCase()] || 'application/octet-stream'
+  }
+
+  inferPlaybackStrategy(video) {
+    const ext = path.extname(video.file_path || '').toLowerCase()
+    const videoCodec = (video.video_codec || '').toLowerCase()
+    const formatName = (video.format_name || '').toLowerCase()
+
+    const isMp4Family = ['.mp4', '.m4v', '.mov'].includes(ext) || /(mp4|mov|isom|quicktime)/.test(formatName)
+    const isWebm = ext === '.webm' || /webm/.test(formatName)
+    const isOgg = ext === '.ogv' || /ogg/.test(formatName)
+
+    if (isMp4Family && ['h264', 'avc1'].includes(videoCodec)) return 'direct'
+    if (isWebm && ['vp8', 'vp9', 'av1'].includes(videoCodec)) return 'direct'
+    if (isOgg && ['theora'].includes(videoCodec)) return 'direct'
+
+    return 'transcode'
+  }
+
+  decorateVideo(video) {
+    if (!video) return video
+    return {
+      ...video,
+      mime_type: video.mime_type || this.inferVideoMimeType(video.file_path),
+      playback_strategy: video.playback_strategy || this.inferPlaybackStrategy(video),
+      playback_url: `/video/${video.fingerprint}`
+    }
+  }
+
+  getTranscodedVideoPath(video) {
+    return path.resolve(this.videoTranscodeDir, `${video.fingerprint}.mp4`)
+  }
+
+  async ensureTranscodedVideo(video) {
+    const outputPath = this.getTranscodedVideoPath(video)
+
+    try {
+      const sourceStats = fs.statSync(video.file_path)
+      if (fs.existsSync(outputPath)) {
+        const outputStats = fs.statSync(outputPath)
+        if (outputStats.mtimeMs >= sourceStats.mtimeMs) {
+          return outputPath
+        }
+      }
+    } catch (error) {
+      // Fall through to regeneration.
+    }
+
+    const existingJob = this.videoTranscodeJobs.get(video.fingerprint)
+    if (existingJob) return existingJob
+
+    fs.mkdirSync(this.videoTranscodeDir, { recursive: true })
+    const tempPath = `${outputPath}.tmp.mp4`
+
+    const job = new Promise((resolve, reject) => {
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+      } catch (error) {
+        // Ignore stale temp cleanup failures.
+      }
+
+      const args = [
+        '-y',
+        '-i', video.file_path,
+        '-map', '0:v:0',
+        '-map', '0:a:0?',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', '23',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        tempPath
+      ]
+
+      let stderr = ''
+      const child = spawn('ffmpeg', args, {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: true
+      })
+
+      const timer = setTimeout(() => {
+        child.kill()
+      }, VIDEO_TRANSCODE_TIMEOUT_MS)
+
+      child.stderr.on('data', (chunk) => {
+        if (stderr.length < 8000) stderr += chunk.toString()
+      })
+
+      child.on('error', (error) => {
+        clearTimeout(timer)
+        try {
+          if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+        } catch (cleanupError) {}
+        reject(error)
+      })
+
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (code === 0 && fs.existsSync(tempPath)) {
+          try {
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath)
+            fs.renameSync(tempPath, outputPath)
+            resolve(outputPath)
+            return
+          } catch (error) {
+            reject(error)
+            return
+          }
+        }
+
+        try {
+          if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+        } catch (cleanupError) {}
+
+        const detail = stderr.trim() || `ffmpeg exited with code ${code}`
+        reject(new Error(detail))
+      })
+    }).finally(() => {
+      this.videoTranscodeJobs.delete(video.fingerprint)
+    })
+
+    this.videoTranscodeJobs.set(video.fingerprint, job)
+    return job
+  }
+
+  streamVideoFile(req, res, filePath, mimeType) {
+    const stat = fs.statSync(filePath)
+    const fileSize = stat.size
+    const range = req.headers.range
+
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-")
+      const start = parseInt(parts[0], 10)
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1
+      const chunkSize = (end - start) + 1
+      const file = fs.createReadStream(filePath, { start, end })
+      const head = {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': mimeType,
+      }
+      res.writeHead(206, head)
+      file.pipe(res)
+      return
+    }
+
+    const head = {
+      'Accept-Ranges': 'bytes',
+      'Content-Length': fileSize,
+      'Content-Type': mimeType,
+    }
+    res.writeHead(200, head)
+    fs.createReadStream(filePath).pipe(res)
   }
   
   start() {
@@ -409,43 +586,29 @@ class BreadboardServer {
     })
 
     // Serve video files by fingerprint
-    app.get('/video/:fingerprint', (req, res) => {
+    app.get('/video/:fingerprint', async (req, res) => {
       if (!this.config.videoDb) {
         return res.status(503).send('Video system not initialized');
       }
       
-      const video = this.config.videoDb.getVideo(req.params.fingerprint);
+      const video = this.decorateVideo(this.config.videoDb.getVideo(req.params.fingerprint));
       if (!video || !video.file_path) {
         return res.status(404).send('Video not found');
       }
-      
-      const filePath = video.file_path;
-      const stat = require('fs').statSync(filePath);
-      const fileSize = stat.size;
-      const range = req.headers.range;
-      
-      if (range) {
-        // Handle range requests for video streaming
-        const parts = range.replace(/bytes=/, "").split("-");
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-        const chunksize = (end - start) + 1;
-        const file = require('fs').createReadStream(filePath, { start, end });
-        const head = {
-          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': chunksize,
-          'Content-Type': 'video/mp4',
-        };
-        res.writeHead(206, head);
-        file.pipe(res);
-      } else {
-        const head = {
-          'Content-Length': fileSize,
-          'Content-Type': 'video/mp4',
-        };
-        res.writeHead(200, head);
-        require('fs').createReadStream(filePath).pipe(res);
+
+      try {
+        if (video.playback_strategy === 'transcode') {
+          const transcodedPath = await this.ensureTranscodedVideo(video)
+          this.streamVideoFile(req, res, transcodedPath, 'video/mp4')
+          return
+        }
+
+        this.streamVideoFile(req, res, video.file_path, video.mime_type)
+      } catch (error) {
+        console.error('Video playback error:', error)
+        if (!res.headersSent) {
+          res.status(500).send('Unable to prepare video playback')
+        }
       }
     })
     
@@ -707,7 +870,10 @@ class BreadboardServer {
       const limit = req.query.limit != null ? parseInt(req.query.limit) : 500;
       try {
         const result = this.config.videoDb.search(query, { sort, direction, offset, limit });
-        res.json(result);
+        res.json({
+          ...result,
+          results: result.results.map((video) => this.decorateVideo(video))
+        });
       } catch (e) {
         console.error('Video search error:', e);
         res.status(500).json({ error: e.message });
@@ -763,7 +929,7 @@ class BreadboardServer {
 
     app.get("/api/videos/:fingerprint", (req, res) => {
       if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
-      const video = this.config.videoDb.getVideo(req.params.fingerprint);
+      const video = this.decorateVideo(this.config.videoDb.getVideo(req.params.fingerprint));
       if (!video) return res.status(404).json({ error: 'Video not found' });
       res.json(video);
     })
