@@ -18,8 +18,8 @@
         display: flex;
         flex-direction: column;
         height: 100vh;
+        background: #000;
       }
-      
       .video-viewer-titlebar {
         -webkit-app-region: drag;
         padding: 10px 15px;
@@ -28,19 +28,16 @@
         gap: 10px;
         user-select: none;
       }
-      
       body.default .video-viewer-titlebar {
         background: white;
         color: #111;
         border-bottom: 1px solid rgba(0,0,0,0.1);
       }
-      
       body.dark .video-viewer-titlebar {
         background: #1a1a1a;
         color: whitesmoke;
         border-bottom: 1px solid rgba(255,255,255,0.1);
       }
-      
       .video-viewer-title {
         flex: 1;
         font-weight: bold;
@@ -49,7 +46,6 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      
       .video-viewer-container {
         flex: 1;
         display: flex;
@@ -57,15 +53,19 @@
         justify-content: center;
         background: #000;
         position: relative;
+        overflow: hidden;
+        min-height: 0;
+        cursor: default;
       }
-      
-      video {
+      #viewer-video {
         max-width: 100%;
         max-height: 100%;
         width: auto;
         height: auto;
+        object-fit: contain;
+        transform-origin: center center;
+        user-select: none;
       }
-
       .video-viewer-error {
         position: absolute;
         inset: 0;
@@ -78,60 +78,114 @@
         background: rgba(0,0,0,0.72);
         font-size: 0.95rem;
       }
-      
       .video-viewer-controls {
-        padding: 10px;
+        padding: 8px 10px;
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 6px;
+        min-height: 46px;
       }
-      
       body.default .video-viewer-controls {
         background: white;
         color: #111;
         border-top: 1px solid rgba(0,0,0,0.1);
       }
-      
       body.dark .video-viewer-controls {
         background: #1a1a1a;
         color: whitesmoke;
         border-top: 1px solid rgba(255,255,255,0.1);
       }
-      
       .video-filename {
-        flex: 1;
+        flex: 0 1 220px;
+        min-width: 120px;
         font-size: 0.85rem;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         opacity: 0.7;
       }
-      
       .viewer-btn {
         -webkit-app-region: no-drag;
         background: none;
         border: none;
         cursor: pointer;
-        padding: 8px 12px;
+        padding: 7px 9px;
         border-radius: 4px;
         transition: background 0.2s;
         font-size: 0.9rem;
+        color: inherit;
       }
-      
-      body.default .viewer-btn {
-        color: #111;
+      body.default .viewer-btn:hover { background: rgba(0,0,0,0.05); }
+      body.dark .viewer-btn:hover { background: rgba(255,255,255,0.05); }
+      .viewer-timegroup {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        min-width: 220px;
       }
-      
-      body.default .viewer-btn:hover {
-        background: rgba(0,0,0,0.05);
+      .viewer-time {
+        min-width: 42px;
+        text-align: center;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.72;
       }
-      
-      body.dark .viewer-btn {
-        color: whitesmoke;
+      .viewer-seek {
+        position: relative;
+        flex: 1;
+        height: 18px;
+        display: flex;
+        align-items: center;
       }
-      
-      body.dark .viewer-btn:hover {
-        background: rgba(255,255,255,0.05);
+      .viewer-seek::before,
+      .viewer-buffered,
+      .viewer-progress {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 4px;
+        border-radius: 999px;
+      }
+      .viewer-seek::before { background: rgba(128,128,128,0.25); }
+      .viewer-buffered { right: auto; width: 0; background: rgba(128,128,128,0.35); }
+      .viewer-progress { right: auto; width: 0; background: cornflowerblue; }
+      #seek,
+      #volume {
+        position: relative;
+        z-index: 1;
+        appearance: none;
+        -webkit-appearance: none;
+        background: transparent;
+        height: 18px;
+        margin: 0;
+        cursor: pointer;
+      }
+      #seek { width: 100%; }
+      #volume {
+        width: 86px;
+        accent-color: cornflowerblue;
+      }
+      #seek::-webkit-slider-thumb,
+      #volume::-webkit-slider-thumb {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        border: 0;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.45);
+      }
+      #seek::-moz-range-thumb,
+      #volume::-moz-range-thumb {
+        width: 12px;
+        height: 12px;
+        border: 0;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.45);
       }
     </style>
   </head>
@@ -139,83 +193,236 @@
     <div class="video-viewer-titlebar">
       <span class="video-viewer-title"><%=filename%></span>
     </div>
-    <div class="video-viewer-container">
-      <video 
-        id="viewer-video"
-        data-fingerprint="<%=fingerprint%>"
-        controls 
-        autoplay
-        loop
-      ></video>
+    <div class="video-viewer-container" id="viewer-stage">
+      <video id="viewer-video" data-fingerprint="<%=fingerprint%>" autoplay loop playsinline></video>
       <div class="video-viewer-error" id="viewer-error">
         Breadboard could not prepare this video for playback.
       </div>
     </div>
     <div class="video-viewer-controls">
       <span class="video-filename"><%=filename%></span>
-      <button class="viewer-btn" id="toggle-loop" title="Toggle loop">
-        <i class="fa-solid fa-repeat"></i> Loop
-      </button>
-      <button class="viewer-btn" id="toggle-controls" title="Toggle controls">
-        <i class="fa-solid fa-sliders"></i> Controls
-      </button>
+      <button class="viewer-btn" id="play" title="Play/Pause (Space)"><i class="fa-solid fa-pause"></i></button>
+      <button class="viewer-btn" id="frame-back" title="Previous frame (,)"><i class="fa-solid fa-backward-step"></i></button>
+      <button class="viewer-btn" id="frame-forward" title="Next frame (.)"><i class="fa-solid fa-forward-step"></i></button>
+      <button class="viewer-btn" id="capture-frame" title="Save current frame (S)"><i class="fa-solid fa-camera"></i></button>
+      <div class="viewer-timegroup">
+        <span class="viewer-time" id="current-time">0:00</span>
+        <div class="viewer-seek">
+          <div class="viewer-buffered" id="buffered"></div>
+          <div class="viewer-progress" id="progress"></div>
+          <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+        </div>
+        <span class="viewer-time" id="duration">0:00</span>
+      </div>
+      <button class="viewer-btn" id="mute" title="Mute (M)"><i class="fa-solid fa-volume-high"></i></button>
+      <input id="volume" type="range" min="0" max="100" value="50" step="1" aria-label="Volume">
+      <button class="viewer-btn" id="zoom-out" title="Zoom out (-)"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+      <button class="viewer-btn" id="zoom-reset" title="Fit to view (0)"><i class="fa-solid fa-expand"></i></button>
+      <button class="viewer-btn" id="zoom-in" title="Zoom in (+)"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+      <button class="viewer-btn" id="toggle-loop" title="Toggle loop"><i class="fa-solid fa-repeat"></i></button>
     </div>
-    
+
     <script>
       const video = document.getElementById('viewer-video');
+      const stage = document.getElementById('viewer-stage');
       const errorBox = document.getElementById('viewer-error');
-      const loopBtn = document.getElementById('toggle-loop');
-      const controlsBtn = document.getElementById('toggle-controls');
       const fingerprint = video.dataset.fingerprint;
+      let meta = {};
+      let zoom = 1;
+      let panX = 0;
+      let panY = 0;
+      let dragging = false;
+      let dragStartX = 0;
+      let dragStartY = 0;
+      let startPanX = 0;
+      let startPanY = 0;
+      let didDrag = false;
+      let clickTimer = null;
+
+      const $ = (id) => document.getElementById(id);
+
+      function clock(seconds) {
+        if (!seconds || !isFinite(seconds) || seconds < 0) return '0:00';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+      }
+
+      function applyTransform() {
+        video.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+        stage.style.cursor = zoom > 1 ? 'grab' : 'default';
+      }
+
+      function syncPlayIcon() {
+        $('play').querySelector('i').className = video.paused ? 'fa-solid fa-play' : 'fa-solid fa-pause';
+      }
+
+      function syncVolumeIcon() {
+        const icon = $('mute').querySelector('i');
+        const level = video.muted || video.volume === 0 ? 'mute' : (video.volume < 0.5 ? 'low' : 'high');
+        icon.className = level === 'mute' ? 'fa-solid fa-volume-xmark' : (level === 'low' ? 'fa-solid fa-volume-low' : 'fa-solid fa-volume-high');
+      }
+
+      function updateSeek() {
+        const duration = isFinite(video.duration) ? video.duration : 0;
+        const current = isFinite(video.currentTime) ? video.currentTime : 0;
+        const pct = duration > 0 ? Math.min(100, Math.max(0, (current / duration) * 100)) : 0;
+        $('seek').value = duration > 0 ? Math.round((current / duration) * 1000) : 0;
+        $('progress').style.width = `${pct}%`;
+        let bufferedPct = 0;
+        if (duration > 0 && video.buffered && video.buffered.length) bufferedPct = Math.min(100, (video.buffered.end(video.buffered.length - 1) / duration) * 100);
+        $('buffered').style.width = `${bufferedPct}%`;
+        $('current-time').textContent = clock(current);
+        $('duration').textContent = clock(duration);
+      }
+
+      function togglePlayback() {
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+        syncPlayIcon();
+      }
+
+      function stepFrame(direction) {
+        video.pause();
+        const fps = Number(meta.fps) > 0 ? Number(meta.fps) : 30;
+        const duration = isFinite(video.duration) ? video.duration : Number.MAX_SAFE_INTEGER;
+        video.currentTime = Math.max(0, Math.min(duration, (video.currentTime || 0) + (direction / fps)));
+        syncPlayIcon();
+        updateSeek();
+      }
+
+      function captureFrame() {
+        if (!video.videoWidth || !video.videoHeight) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        const a = document.createElement('a');
+        const base = (meta.filename || fingerprint || 'video-frame').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_');
+        a.href = canvas.toDataURL('image/png');
+        a.download = `${base}-${clock(video.currentTime).replace(/:/g, '-')}.png`;
+        a.click();
+      }
+
+      async function setVolume(value) {
+        const vol = Math.max(0, Math.min(100, isNaN(value) ? 50 : value));
+        video.volume = vol / 100;
+        video.muted = vol === 0;
+        $('volume').value = vol;
+        syncVolumeIcon();
+        await fetch('/api/video-settings/video_volume', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ val: vol })
+        }).catch(() => {});
+      }
 
       async function initPlayback() {
         try {
+          const volumeRes = await fetch('/api/video-settings/video_volume').then(r => r.ok ? r.json() : null).catch(() => null);
+          const volume = volumeRes && volumeRes.val != null ? parseInt(volumeRes.val) : 50;
+          await setVolume(volume);
           const response = await fetch(`/api/videos/${fingerprint}`);
           if (!response.ok) throw new Error('metadata request failed');
-          const meta = await response.json();
+          meta = await response.json();
           video.src = meta.playback_url || `/video/${fingerprint}`;
           await video.play().catch(() => {});
+          syncPlayIcon();
         } catch (error) {
           console.error('Viewer playback init failed', error);
           errorBox.style.display = 'flex';
         }
       }
 
-      video.addEventListener('error', () => {
-        errorBox.style.display = 'flex';
+      video.addEventListener('error', () => { errorBox.style.display = 'flex'; });
+      video.addEventListener('play', syncPlayIcon);
+      video.addEventListener('pause', syncPlayIcon);
+      video.addEventListener('timeupdate', updateSeek);
+      video.addEventListener('progress', updateSeek);
+      video.addEventListener('loadedmetadata', updateSeek);
+      video.addEventListener('volumechange', syncVolumeIcon);
+
+      $('play').addEventListener('click', togglePlayback);
+      $('frame-back').addEventListener('click', () => stepFrame(-1));
+      $('frame-forward').addEventListener('click', () => stepFrame(1));
+      $('capture-frame').addEventListener('click', captureFrame);
+      $('seek').addEventListener('input', () => {
+        if (!isFinite(video.duration) || video.duration <= 0) return;
+        video.currentTime = (parseInt($('seek').value) / 1000) * video.duration;
+        updateSeek();
       });
-      
-      // Toggle loop
-      loopBtn.addEventListener('click', () => {
+      $('mute').addEventListener('click', () => { video.muted = !video.muted; syncVolumeIcon(); });
+      $('volume').addEventListener('input', (e) => setVolume(parseInt(e.target.value)));
+      $('zoom-in').addEventListener('click', () => { zoom = Math.min(20, zoom + 0.25); applyTransform(); });
+      $('zoom-out').addEventListener('click', () => { zoom = Math.max(0.1, zoom - 0.25); applyTransform(); });
+      $('zoom-reset').addEventListener('click', () => { zoom = 1; panX = 0; panY = 0; applyTransform(); });
+      $('toggle-loop').addEventListener('click', () => {
         video.loop = !video.loop;
-        loopBtn.style.opacity = video.loop ? '1' : '0.5';
+        $('toggle-loop').style.opacity = video.loop ? '1' : '0.5';
       });
-      
-      // Toggle controls
-      controlsBtn.addEventListener('click', () => {
-        video.controls = !video.controls;
-        controlsBtn.style.opacity = video.controls ? '1' : '0.5';
+
+      stage.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = stage.getBoundingClientRect();
+        const cx = e.clientX - rect.left - rect.width / 2;
+        const cy = e.clientY - rect.top - rect.height / 2;
+        const oldZoom = zoom;
+        zoom = Math.max(0.1, Math.min(20, zoom + (e.deltaY < 0 ? 0.15 : -0.15)));
+        const scale = zoom / oldZoom;
+        panX = cx - scale * (cx - panX);
+        panY = cy - scale * (cy - panY);
+        applyTransform();
+      }, { passive: false });
+
+      stage.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        dragging = true;
+        didDrag = false;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        startPanX = panX;
+        startPanY = panY;
+        stage.style.cursor = 'grabbing';
       });
-      
-      // Keyboard shortcuts
+      document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDrag = true;
+        panX = startPanX + dx;
+        panY = startPanY + dy;
+        applyTransform();
+      });
+      document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        if (!didDrag) {
+          if (clickTimer) clearTimeout(clickTimer);
+          clickTimer = setTimeout(() => { clickTimer = null; togglePlayback(); }, 300);
+        }
+        applyTransform();
+      });
+      stage.addEventListener('dblclick', () => {
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+        window.close();
+      });
+
       document.addEventListener('keydown', (e) => {
-        if (e.code === 'Space') {
-          e.preventDefault();
-          if (video.paused) {
-            video.play();
-          } else {
-            video.pause();
-          }
-        } else if (e.code === 'ArrowLeft') {
-          video.currentTime = Math.max(0, video.currentTime - 5);
-        } else if (e.code === 'ArrowRight') {
-          video.currentTime = Math.min(video.duration, video.currentTime + 5);
-        } else if (e.code === 'KeyF') {
-          if (document.fullscreenElement) {
-            document.exitFullscreen();
-          } else {
-            video.requestFullscreen();
-          }
+        if (e.code === 'Space') { e.preventDefault(); togglePlayback(); }
+        else if (e.code === 'Escape') window.close();
+        else if (e.code === 'Comma') { e.preventDefault(); stepFrame(-1); }
+        else if (e.code === 'Period') { e.preventDefault(); stepFrame(1); }
+        else if (e.code === 'KeyS') { e.preventDefault(); captureFrame(); }
+        else if (e.code === 'KeyM') { e.preventDefault(); video.muted = !video.muted; syncVolumeIcon(); }
+        else if (e.code === 'ArrowLeft') video.currentTime = Math.max(0, video.currentTime - 5);
+        else if (e.code === 'ArrowRight') video.currentTime = Math.min(video.duration || Number.MAX_SAFE_INTEGER, video.currentTime + 5);
+        else if (e.key === '+' || e.key === '=') { zoom = Math.min(20, zoom + 0.25); applyTransform(); }
+        else if (e.key === '-') { zoom = Math.max(0.1, zoom - 0.25); applyTransform(); }
+        else if (e.key === '0') { zoom = 1; panX = 0; panY = 0; applyTransform(); }
+        else if (e.code === 'KeyF') {
+          if (document.fullscreenElement) document.exitFullscreen();
+          else stage.requestFullscreen();
         }
       });
 

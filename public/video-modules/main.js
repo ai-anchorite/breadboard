@@ -412,7 +412,7 @@ class VideoApp {
     const mediaHTML = hasThumb
       ? `<img class='video-thumb' src="${thumbUrl}" loading="lazy" draggable="false"><video class='video-hover' data-src="${videoUrl}" preload="none" muted loop playsinline></video>`
       : `<video class='video-fallback' data-src="${videoUrl}" preload="none" muted loop playsinline></video>`
-    return `<div class='card video-card' data-fingerprint='${video.fingerprint}' data-src='${video.file_path}' data-playback-url='${videoUrl}' data-has-thumb='${hasThumb}' style='${arStyle}'><div class='grab'><button title='like this video' data-favorited="${isFav}" data-fingerprint="${video.fingerprint}" class='favorite-btn'><i class="${favClass}"></i></button><button title='open in explorer' data-src="${video.file_path}" class='open-file'><i class="fa-regular fa-folder-open"></i></button><button title='delete' data-fingerprint="${video.fingerprint}" class='trash-btn'><i class="fa-regular fa-trash-can"></i></button><button title='play in grid' data-fingerprint="${video.fingerprint}" class='play-lock-btn grab-right'><i class="fa-solid fa-play"></i></button><button title='pop out' data-fingerprint="${video.fingerprint}" class='popout-btn'><i class="fa-solid fa-up-right-from-square"></i></button></div><div class='video-thumb-wrap'>${mediaHTML}<div class='video-duration'>${dur}</div></div></div>`
+    return `<div class='card video-card' data-fingerprint='${video.fingerprint}' data-src='${video.file_path}' data-playback-url='${videoUrl}' data-has-thumb='${hasThumb}' style='${arStyle}'><div class='grab'><button title='like this video' data-favorited="${isFav}" data-fingerprint="${video.fingerprint}" class='favorite-btn'><i class="${favClass}"></i></button><button title='open in explorer' data-src="${video.file_path}" class='open-file'><i class="fa-regular fa-folder-open"></i></button><button title='delete' data-fingerprint="${video.fingerprint}" class='trash-btn'><i class="fa-regular fa-trash-can"></i></button><button title='play in grid' data-fingerprint="${video.fingerprint}" class='play-lock-btn grab-right'><i class="fa-solid fa-play"></i></button><button title='mute locked playback' data-fingerprint="${video.fingerprint}" class='lock-mute-btn'><i class="fa-solid fa-volume-high"></i></button><button title='pop out' data-fingerprint="${video.fingerprint}" class='popout-btn'><i class="fa-solid fa-up-right-from-square"></i></button></div><div class='video-thumb-wrap'>${mediaHTML}<div class='video-duration'>${dur}</div></div></div>`
   }
 
   attachCardHandlers() {
@@ -440,7 +440,7 @@ class VideoApp {
 
     // Prevent DragSelect from selecting when clicking grab buttons
     content.addEventListener('mousedown', (e) => {
-      const btn = e.target.closest('.favorite-btn, .open-file, .trash-btn, .play-lock-btn, .popout-btn')
+      const btn = e.target.closest('.favorite-btn, .open-file, .trash-btn, .play-lock-btn, .lock-mute-btn, .popout-btn')
       if (btn) e.stopPropagation()
     }, true)
 
@@ -453,6 +453,7 @@ class VideoApp {
       const openBtn = e.target.closest('.open-file')
       const trashBtn = e.target.closest('.trash-btn')
       const playBtn = e.target.closest('.play-lock-btn')
+      const muteBtn = e.target.closest('.lock-mute-btn')
       const popoutBtn = e.target.closest('.popout-btn')
       const grabArea = e.target.closest('.grab')
 
@@ -460,6 +461,7 @@ class VideoApp {
       else if (openBtn) { e.preventDefault(); e.stopPropagation(); this.api.open(openBtn.getAttribute('data-src')) }
       else if (trashBtn) { e.preventDefault(); e.stopPropagation(); await this.trashVideo(trashBtn, card) }
       else if (playBtn) { e.preventDefault(); e.stopPropagation(); this.togglePlayLock(card) }
+      else if (muteBtn) { e.preventDefault(); e.stopPropagation(); this.toggleLockedMute(card) }
       else if (popoutBtn) { e.preventDefault(); e.stopPropagation(); this.popoutVideo(card) }
       else if (grabArea) { /* header area — let DragSelect handle selection */ }
       else {
@@ -546,7 +548,18 @@ class VideoApp {
       if (hoverVideo) hoverVideo.style.display = 'block'
       video.play().catch(() => {})
       if (btn) btn.querySelector('i').className = 'fa-solid fa-pause'
+      const muteBtn = card.querySelector('.lock-mute-btn i')
+      if (muteBtn) muteBtn.className = video.muted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high'
     }
+  }
+
+  toggleLockedMute(card) {
+    if (!card.classList.contains('playing-locked')) return
+    const video = card.querySelector('video.video-hover') || card.querySelector('video.video-fallback')
+    const icon = card.querySelector('.lock-mute-btn i')
+    if (!video) return
+    video.muted = !video.muted
+    if (icon) icon.className = video.muted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high'
   }
 
   popoutVideo(card) {
@@ -567,9 +580,11 @@ class VideoApp {
     const selectedIndex = allCards.indexOf(selectedCard)
     this._cardData = []
     allCards.forEach(card => {
+      const fingerprint = card.getAttribute('data-fingerprint')
+      const meta = this.videos.find(v => v.fingerprint === fingerprint) || {}
       const video = card.querySelector('video.video-hover') || card.querySelector('video.video-fallback')
-      const videoSrc = video ? (video.src || video.dataset.src) : (card.getAttribute('data-playback-url') || `/video/${card.getAttribute('data-fingerprint')}`)
-      this._cardData.push({ fingerprint: card.getAttribute('data-fingerprint'), file_path: card.getAttribute('data-src'), videoSrc })
+      const videoSrc = video ? (video.src || video.dataset.src) : (card.getAttribute('data-playback-url') || `/video/${fingerprint}`)
+      this._cardData.push({ fingerprint, file_path: card.getAttribute('data-src'), videoSrc, filename: meta.filename || '', fps: meta.fps || 30 })
     })
     this._currentIndex = selectedIndex >= 0 ? selectedIndex : 0
     this._zoom = 1; this._panX = 0; this._panY = 0; this._viewerOpen = true
@@ -577,6 +592,7 @@ class VideoApp {
     this.clearSelection()
     document.querySelectorAll('.video-card video').forEach(v => { v.pause(); v.currentTime = 0 })
     this._buildViewerOverlay()
+    this._viewerOpen = true
     this._showVideo(this._currentIndex)
     const nav = document.querySelector('nav')
     if (nav) { this._navWasAutoHide = nav.classList.contains('autohide'); if (!this._navWasAutoHide) nav.classList.add('autohide'); nav.classList.remove('force-show') }
@@ -590,6 +606,10 @@ class VideoApp {
       else if (e.key === '0') this._resetZoom()
       else if (e.key === ' ') { e.preventDefault(); this._togglePlayback() }
       else if (e.key === 'i') this._togglePanel()
+      else if (e.key === 's') { e.preventDefault(); this._captureFrame() }
+      else if (e.key === '.') { e.preventDefault(); this._stepFrame(1) }
+      else if (e.key === ',') { e.preventDefault(); this._stepFrame(-1) }
+      else if (e.key.toLowerCase() === 'm') { e.preventDefault(); this._toggleMute() }
     }
     document.addEventListener('keydown', this._keyHandler)
   }
@@ -611,6 +631,20 @@ class VideoApp {
           <button class='bb-tb-btn bb-tb-next' title='Next'><i class="fa-solid fa-chevron-right"></i></button>
           <span class='bb-tb-sep'></span>
           <button class='bb-tb-btn bb-tb-play' title='Play/Pause (Space)'><i class="fa-solid fa-pause"></i></button>
+          <button class='bb-tb-btn bb-tb-frame-back' title='Previous frame (,)'><i class="fa-solid fa-backward-step"></i></button>
+          <button class='bb-tb-btn bb-tb-frame-forward' title='Next frame (.)'><i class="fa-solid fa-forward-step"></i></button>
+          <button class='bb-tb-btn bb-tb-capture' title='Save current frame (S)'><i class="fa-solid fa-camera"></i></button>
+          <div class='bb-tb-timegroup'>
+            <span class='bb-tb-time bb-tb-current'>0:00</span>
+            <div class='bb-tb-seek' title='Seek'>
+              <div class='bb-tb-buffered'></div>
+              <div class='bb-tb-progress'></div>
+              <input class='bb-tb-seek-input' type='range' min='0' max='1000' value='0' step='1' aria-label='Seek'>
+            </div>
+            <span class='bb-tb-time bb-tb-duration'>0:00</span>
+          </div>
+          <button class='bb-tb-btn bb-tb-mute' title='Mute (M)'><i class="fa-solid fa-volume-high"></i></button>
+          <input class='bb-tb-volume' type='range' min='0' max='100' value='${this.volume}' step='1' aria-label='Volume'>
           <span class='bb-tb-sep'></span>
           <button class='bb-tb-btn bb-tb-zoom-out' title='Zoom out (−)'><i class="fa-solid fa-magnifying-glass-minus"></i></button>
           <button class='bb-tb-btn bb-tb-zoom-reset' title='Fit to view (0)'><i class="fa-solid fa-expand"></i></button>
@@ -637,10 +671,16 @@ class VideoApp {
     $('.bb-tb-zoom-out').addEventListener('click', (e) => { e.stopPropagation(); this._zoomBy(-0.25) })
     $('.bb-tb-zoom-reset').addEventListener('click', (e) => { e.stopPropagation(); this._resetZoom() })
     $('.bb-tb-play').addEventListener('click', (e) => { e.stopPropagation(); this._togglePlayback() })
+    $('.bb-tb-frame-back').addEventListener('click', (e) => { e.stopPropagation(); this._stepFrame(-1) })
+    $('.bb-tb-frame-forward').addEventListener('click', (e) => { e.stopPropagation(); this._stepFrame(1) })
+    $('.bb-tb-capture').addEventListener('click', (e) => { e.stopPropagation(); this._captureFrame() })
+    $('.bb-tb-mute').addEventListener('click', (e) => { e.stopPropagation(); this._toggleMute() })
+    $('.bb-tb-volume').addEventListener('input', (e) => { e.stopPropagation(); this._setViewerVolume(parseInt(e.target.value)) })
+    $('.bb-tb-seek-input').addEventListener('input', (e) => { e.stopPropagation(); this._seekViewer(parseInt(e.target.value)) })
     $('.bb-tb-panel-toggle').addEventListener('click', (e) => { e.stopPropagation(); this._togglePanel() })
     $('.bb-tb-close').addEventListener('click', (e) => { e.stopPropagation(); this._closeViewer() })
 
-    let clickStartX, clickStartY, didDrag
+    let clickStartX, clickStartY, didDrag, clickTimer
     $('.bb-viewer-image-area').addEventListener('mousedown', (e) => { clickStartX = e.clientX; clickStartY = e.clientY; didDrag = false })
     $('.bb-viewer-image-area').addEventListener('wheel', (e) => { e.preventDefault(); e.stopPropagation(); this._zoomAtPoint(e.deltaY < 0 ? 0.15 : -0.15, e.clientX, e.clientY) }, { passive: false })
 
@@ -661,7 +701,13 @@ class VideoApp {
       if (!didDrag && clickStartX !== undefined) {
         if (Math.abs(e.clientX - clickStartX) < 5 && Math.abs(e.clientY - clickStartY) < 5) {
           const t = document.elementFromPoint(e.clientX, e.clientY)
-          if (t && (t.classList.contains('bb-viewer-image-area') || t.classList.contains('bb-viewer-img-wrap') || t.classList.contains('bb-viewer-video'))) this._closeViewer()
+          if (t && (t.classList.contains('bb-viewer-image-area') || t.classList.contains('bb-viewer-img-wrap') || t.classList.contains('bb-viewer-video'))) {
+            if (clickTimer) {
+              clearTimeout(clickTimer); clickTimer = null; this._closeViewer()
+            } else {
+              clickTimer = setTimeout(() => { clickTimer = null; this._togglePlayback() }, 300)
+            }
+          }
         }
       }
       clickStartX = undefined
@@ -679,9 +725,12 @@ class VideoApp {
     const data = this._cardData[index]
     if (!data) return
     const video = document.querySelector('.bb-viewer-video')
-    if (video) { video.src = data.videoSrc; video.volume = this.volume / 100; video.load(); video.play().catch(() => {}); this._applyTransform() }
-    const playBtn = document.querySelector('.bb-tb-play i')
-    if (playBtn) { playBtn.classList.remove('fa-play'); playBtn.classList.add('fa-pause') }
+    if (video) {
+      this._wireViewerMediaEvents(video)
+      video.src = data.videoSrc; video.volume = this.volume / 100; video.muted = false; video.load(); video.play().catch(() => {}); this._applyTransform()
+      this._updateViewerVolumeUI()
+    }
+    this._syncPlayIcon(false)
     const label = `${index + 1} / ${this._cardData.length}`
     const counter = document.querySelector('.bb-viewer-counter')
     const counterPanel = document.querySelector('.bb-viewer-counter-panel')
@@ -694,6 +743,7 @@ class VideoApp {
     const wrap = document.querySelector('.bb-viewer-img-wrap')
     if (wrap) wrap.style.cursor = 'default'
     this._updateZoomLabel()
+    this._updateSeekUI()
     await this._loadPanel(data)
   }
 
@@ -723,10 +773,99 @@ class VideoApp {
 
   // --- Playback ---
   _togglePlayback() {
-    const v = document.querySelector('.bb-viewer-video'), btn = document.querySelector('.bb-tb-play i')
+    const v = document.querySelector('.bb-viewer-video')
     if (!v) return
-    if (v.paused) { v.play().catch(() => {}); if (btn) { btn.classList.remove('fa-play'); btn.classList.add('fa-pause') } }
-    else { v.pause(); if (btn) { btn.classList.remove('fa-pause'); btn.classList.add('fa-play') } }
+    if (v.paused) v.play().catch(() => {})
+    else v.pause()
+    this._syncPlayIcon(v.paused)
+  }
+  _wireViewerMediaEvents(video) {
+    video.onplay = () => this._syncPlayIcon(false)
+    video.onpause = () => this._syncPlayIcon(true)
+    video.ontimeupdate = () => this._updateSeekUI()
+    video.onprogress = () => this._updateSeekUI()
+    video.onloadedmetadata = () => this._updateSeekUI()
+    video.onvolumechange = () => this._updateViewerVolumeUI()
+  }
+  _syncPlayIcon(paused) {
+    const btn = document.querySelector('.bb-tb-play i')
+    if (!btn) return
+    btn.classList.toggle('fa-play', paused)
+    btn.classList.toggle('fa-pause', !paused)
+  }
+  _seekViewer(raw) {
+    const v = document.querySelector('.bb-viewer-video')
+    if (!v || !isFinite(v.duration) || v.duration <= 0) return
+    v.currentTime = (raw / 1000) * v.duration
+    this._updateSeekUI()
+  }
+  _updateSeekUI() {
+    const v = document.querySelector('.bb-viewer-video')
+    if (!v) return
+    const duration = isFinite(v.duration) ? v.duration : 0
+    const current = isFinite(v.currentTime) ? v.currentTime : 0
+    const input = document.querySelector('.bb-tb-seek-input')
+    const progress = document.querySelector('.bb-tb-progress')
+    const buffered = document.querySelector('.bb-tb-buffered')
+    const currentLabel = document.querySelector('.bb-tb-current')
+    const durationLabel = document.querySelector('.bb-tb-duration')
+    const pct = duration > 0 ? Math.min(100, Math.max(0, (current / duration) * 100)) : 0
+    if (input) input.value = duration > 0 ? Math.round((current / duration) * 1000) : 0
+    if (progress) progress.style.width = `${pct}%`
+    if (buffered) {
+      let bufferedPct = 0
+      if (duration > 0 && v.buffered && v.buffered.length) bufferedPct = Math.min(100, (v.buffered.end(v.buffered.length - 1) / duration) * 100)
+      buffered.style.width = `${bufferedPct}%`
+    }
+    if (currentLabel) currentLabel.textContent = this.formatClock(current)
+    if (durationLabel) durationLabel.textContent = this.formatClock(duration)
+  }
+  async _setViewerVolume(value) {
+    const v = document.querySelector('.bb-viewer-video')
+    const vol = Math.max(0, Math.min(100, isNaN(value) ? this.volume : value))
+    this.volume = vol
+    if (v) { v.volume = vol / 100; v.muted = vol === 0 }
+    await this.api.setVideoSetting('video_volume', vol)
+    this._updateViewerVolumeUI()
+  }
+  _toggleMute() {
+    const v = document.querySelector('.bb-viewer-video')
+    if (!v) return
+    v.muted = !v.muted
+    this._updateViewerVolumeUI()
+  }
+  _updateViewerVolumeUI() {
+    const v = document.querySelector('.bb-viewer-video')
+    const slider = document.querySelector('.bb-tb-volume')
+    const icon = document.querySelector('.bb-tb-mute i')
+    if (slider) slider.value = this.volume
+    if (!icon || !v) return
+    const level = v.muted || v.volume === 0 ? 'mute' : (v.volume < 0.5 ? 'low' : 'high')
+    icon.className = level === 'mute' ? 'fa-solid fa-volume-xmark' : (level === 'low' ? 'fa-solid fa-volume-low' : 'fa-solid fa-volume-high')
+  }
+  _stepFrame(direction) {
+    const v = document.querySelector('.bb-viewer-video')
+    const data = this._cardData?.[this._currentIndex]
+    if (!v) return
+    v.pause()
+    const fps = Number(data?.fps) > 0 ? Number(data.fps) : 30
+    const duration = isFinite(v.duration) ? v.duration : Number.MAX_SAFE_INTEGER
+    v.currentTime = Math.max(0, Math.min(duration, (v.currentTime || 0) + (direction / fps)))
+    this._syncPlayIcon(true)
+    this._updateSeekUI()
+  }
+  _captureFrame() {
+    const v = document.querySelector('.bb-viewer-video')
+    const data = this._cardData?.[this._currentIndex]
+    if (!v || !v.videoWidth || !v.videoHeight) return
+    const canvas = document.createElement('canvas')
+    canvas.width = v.videoWidth; canvas.height = v.videoHeight
+    canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height)
+    const a = document.createElement('a')
+    const base = (data?.filename || data?.fingerprint || 'video-frame').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_')
+    a.href = canvas.toDataURL('image/png')
+    a.download = `${base}-${this.formatClock(v.currentTime).replace(/:/g, '-')}.png`
+    a.click()
   }
 
   // --- Panel ---
@@ -742,7 +881,7 @@ class VideoApp {
   _buildPanelHTML(meta) {
     let tagsHTML = ''
     if (meta.tags && meta.tags.length > 0) tagsHTML = meta.tags.map(t => `<span class='panel-tag panel-filter' data-filter='tag:${t}'><i class="fa-solid fa-tag"></i> ${t}</span>`).join('')
-    const fields = ['filename', 'width', 'height', 'duration', 'size', 'file_path']
+    const fields = ['filename', 'width', 'height', 'duration', 'fps', 'size', 'file_path']
     let rows = ''
     for (const key of fields) {
       if (meta[key] == null || meta[key] === '') continue
@@ -795,6 +934,8 @@ class VideoApp {
       if (thumb) { thumb.style.display = 'block'; if (hoverVideo) hoverVideo.style.display = 'none' }
       const btn = card.querySelector('.play-lock-btn')
       if (btn) btn.querySelector('i').className = 'fa-solid fa-play'
+      const muteBtn = card.querySelector('.lock-mute-btn i')
+      if (muteBtn) muteBtn.className = 'fa-solid fa-volume-high'
     })
   }
 
@@ -884,6 +1025,11 @@ class VideoApp {
   formatDuration(seconds) {
     if (!seconds || seconds <= 0) return ''; const m = Math.floor(seconds / 60), s = Math.floor(seconds % 60)
     return m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `0:${s.toString().padStart(2, '0')}`
+  }
+  formatClock(seconds) {
+    if (!seconds || !isFinite(seconds) || seconds < 0) return '0:00'
+    const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = Math.floor(seconds % 60)
+    return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}` : `${m}:${s.toString().padStart(2, '0')}`
   }
 }
 

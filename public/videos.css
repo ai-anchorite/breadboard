@@ -91,6 +91,12 @@
 }
 
 /* Play-lock and popout buttons float right via .grab-right */
+.video-card .lock-mute-btn {
+  display: none;
+}
+.video-card.playing-locked .lock-mute-btn {
+  display: inline-block;
+}
 
 /* Card header visibility modes */
 [data-minimal=minimal] .video-card .grab {
