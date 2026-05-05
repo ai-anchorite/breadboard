@@ -131,7 +131,7 @@ class VideoScanner {
   }
 
   // Scan a single file
-  async scanFile(filePath, stats, onProgress) {
+  async scanFile(filePath, stats, onProgress, rootPath = null) {
     try {
       if (!stats) {
         stats = await fs.stat(filePath);
@@ -157,7 +157,7 @@ class VideoScanner {
       const dimensions = await this.getVideoMetadata(filePath);
 
       // Index in database
-      const video = await this.db.indexVideo(filePath, stats, dimensions);
+      const video = await this.db.indexVideo(filePath, stats, dimensions, rootPath);
 
       // Generate thumbnail
       if (video && video.fingerprint) {
@@ -186,6 +186,7 @@ class VideoScanner {
   async scanDirectory(dirPath, options = {}, onProgress) {
     const { recursive = true, maxDepth = 10 } = options;
     const videos = [];
+    const rootPath = dirPath; // Store the root path for subfolder calculation
     const self = this; // Capture 'this' context
 
     async function scan(currentPath, depth = 0) {
@@ -206,7 +207,7 @@ class VideoScanner {
               await scan(fullPath, depth + 1);
             }
           } else if (entry.isFile()) {
-            const video = await self.scanFile(fullPath, null, onProgress);
+            const video = await self.scanFile(fullPath, null, onProgress, rootPath);
             if (video) {
               videos.push(video);
             }

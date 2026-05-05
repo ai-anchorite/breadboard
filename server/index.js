@@ -901,6 +901,12 @@ class BreadboardServer {
       res.json(this.config.videoDb.getAllTags());
     })
 
+    app.get("/api/videos/subfolders", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const subfolders = this.config.videoDb.getSubfolders();
+      res.json(subfolders);
+    })
+
     app.post("/api/videos/tags/add", express.json(), (req, res) => {
       if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
       const { fingerprints, tags } = req.body;

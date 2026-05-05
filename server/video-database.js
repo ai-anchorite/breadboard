@@ -31,6 +31,7 @@ class VideoDatabase {
         file_path TEXT NOT NULL,
         filename TEXT NOT NULL,
         root_path TEXT,
+        subfolder TEXT,
         size INTEGER NOT NULL,
         width INTEGER,
         height INTEGER,
@@ -89,6 +90,7 @@ class VideoDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_videos_path ON videos(file_path);
       CREATE INDEX IF NOT EXISTS idx_videos_filename ON videos(filename);
+      CREATE INDEX IF NOT EXISTS idx_videos_subfolder ON videos(subfolder);
       CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_id);
       CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at);
     `);
@@ -96,6 +98,7 @@ class VideoDatabase {
     // Migrate: add columns if they don't exist (for existing databases)
     try { this.db.exec('ALTER TABLE videos ADD COLUMN thumbnail_path TEXT'); } catch (e) { /* already exists */ }
     try { this.db.exec('ALTER TABLE videos ADD COLUMN root_path TEXT'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE videos ADD COLUMN subfolder TEXT'); } catch (e) { /* already exists */ }
     try { this.db.exec('ALTER TABLE videos ADD COLUMN fps REAL'); } catch (e) { /* already exists */ }
     try { this.db.exec('ALTER TABLE videos ADD COLUMN format_name TEXT'); } catch (e) { /* already exists */ }
     try { this.db.exec('ALTER TABLE videos ADD COLUMN mime_type TEXT'); } catch (e) { /* already exists */ }
@@ -123,21 +126,35 @@ class VideoDatabase {
   }
 
   // Index a video file
-  async indexVideo(filePath, stats, dimensions = null) {
+  async indexVideo(filePath, stats, dimensions = null, rootPath = null) {
     const fingerprint = await this.computeFingerprint(filePath, stats);
     const filename = path.basename(filePath);
     const now = Date.now();
 
+    // Calculate subfolder relative to root_path
+    let subfolder = null;
+    if (rootPath) {
+      const normalizedRoot = path.normalize(rootPath);
+      const normalizedFile = path.normalize(path.dirname(filePath));
+      if (normalizedFile.startsWith(normalizedRoot)) {
+        const relative = path.relative(normalizedRoot, normalizedFile);
+        // Keep empty string for root folder files, convert to null only if no rootPath
+        subfolder = relative === '' ? null : relative;
+      }
+    }
+
     const stmt = this.db.prepare(`
       INSERT INTO videos (
-        fingerprint, file_path, filename, size, width, height, 
+        fingerprint, file_path, filename, root_path, subfolder, size, width, height, 
         duration, fps, aspect_ratio, format_name, mime_type,
         video_codec, audio_codec, playback_strategy,
         created_at, modified_at, indexed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(fingerprint) DO UPDATE SET
         file_path = excluded.file_path,
         filename = excluded.filename,
+        root_path = excluded.root_path,
+        subfolder = excluded.subfolder,
         modified_at = excluded.modified_at,
         indexed_at = excluded.indexed_at,
         width = COALESCE(excluded.width, videos.width),
@@ -156,6 +173,8 @@ class VideoDatabase {
       fingerprint,
       filePath,
       filename,
+      rootPath,
+      subfolder,
       stats.size,
       dimensions?.width || null,
       dimensions?.height || null,
@@ -395,7 +414,7 @@ class VideoDatabase {
               : `fingerprint IN (SELECT vt.fingerprint FROM video_tags vt JOIN tags t ON t.id = vt.tag_id WHERE t.name = ?)`;
             where.push(sub);
             params.push(value);
-          } else if (['filename', 'file_path'].includes(field)) {
+          } else if (['filename', 'file_path', 'subfolder'].includes(field)) {
             where.push(`${field} ${op} ?`);
             params.push(`%${value}%`);
           } else if (['width', 'height', 'duration', 'size'].includes(field)) {
@@ -545,6 +564,18 @@ class VideoDatabase {
 
     this.db.prepare('DELETE FROM trash').run();
     return count;
+  }
+
+  // Get unique subfolders with counts
+  getSubfolders() {
+    const rows = this.db.prepare(`
+      SELECT subfolder, COUNT(*) as count 
+      FROM videos 
+      WHERE subfolder IS NOT NULL AND subfolder != ''
+      GROUP BY subfolder 
+      ORDER BY subfolder ASC
+    `).all();
+    return rows;
   }
 
   close() {

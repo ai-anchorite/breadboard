@@ -2070,6 +2070,26 @@ body.default .sb-btn.active { background: royalblue; color: white; border-color:
 }
 .fp-disconnect { color: #e55; }
 .fp-disconnect:hover { background: rgba(238,85,85,0.15); }
+.fp-subfolder-toggle {
+  padding: 10px 0 8px 0;
+  border-top: 1px solid rgba(128,128,128,0.1);
+  margin-top: 8px;
+}
+.fp-subfolder-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.fp-subfolder-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+.fp-subfolder-toggle i {
+  font-size: 11px;
+  opacity: 0.7;
+}
 
 /* --- Custom Confirm Dialog --- */
 .bb-confirm-overlay {

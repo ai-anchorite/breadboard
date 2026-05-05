@@ -120,6 +120,7 @@ class API {
   addVideoTags(fingerprints, tags) { return this._post('/api/videos/tags/add', { fingerprints, tags }) }
   removeVideoTags(fingerprints, tags) { return this._post('/api/videos/tags/remove', { fingerprints, tags }) }
   getAllVideoTags() { return this._get('/api/videos/tags/all') }
+  getVideoSubfolders() { return this._get('/api/videos/subfolders') }
 
   deleteVideos(fingerprints) { return this._post('/api/videos/delete', { fingerprints }) }
   restoreVideos(fingerprints) { return this._post('/api/videos/restore', { fingerprints }) }

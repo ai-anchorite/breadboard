@@ -49,6 +49,7 @@ class VideoApp {
     this.attachNavEvents()
     this.initCardListeners()
     this.initFolderPanel()
+    this.initBookmarkBar()
     this.initTooltips()
     this.initSelection()
     this.initScanProgress()
@@ -112,6 +113,8 @@ class VideoApp {
 
     if (this.autoHideNav) {
       nav.classList.add('autohide')
+      if (this.bookmarkBar) this.bookmarkBar.classList.add('autohide')
+      
       const dragZone = document.createElement('div')
       dragZone.id = 'autohide-drag-zone'
       document.body.appendChild(dragZone)
@@ -119,20 +122,47 @@ class VideoApp {
         if (e.clientY <= 8) {
           if (this._navHideTimer) { clearTimeout(this._navHideTimer); this._navHideTimer = null }
           nav.classList.add('force-show')
+          if (this.bookmarkBar) this.bookmarkBar.classList.add('force-show')
         }
       }
       document.addEventListener('mousemove', this._navTriggerMove)
       this._navMouseLeave = () => {
         if (this._navHideTimer) clearTimeout(this._navHideTimer)
-        this._navHideTimer = setTimeout(() => { nav.classList.remove('force-show'); this._navHideTimer = null }, 600)
+        this._navHideTimer = setTimeout(() => { 
+          nav.classList.remove('force-show')
+          if (this.bookmarkBar) this.bookmarkBar.classList.remove('force-show')
+          this._navHideTimer = null 
+        }, 600)
       }
       nav.addEventListener('mouseleave', this._navMouseLeave)
       nav.addEventListener('mouseenter', () => { if (this._navHideTimer) { clearTimeout(this._navHideTimer); this._navHideTimer = null } })
+      
+      // Also handle bookmark bar hover
+      if (this.bookmarkBar) {
+        this.bookmarkBar.addEventListener('mouseenter', () => { 
+          if (this._navHideTimer) { clearTimeout(this._navHideTimer); this._navHideTimer = null }
+          nav.classList.add('force-show')
+          this.bookmarkBar.classList.add('force-show')
+        })
+        this.bookmarkBar.addEventListener('mouseleave', () => {
+          if (this._navHideTimer) clearTimeout(this._navHideTimer)
+          this._navHideTimer = setTimeout(() => { 
+            nav.classList.remove('force-show')
+            this.bookmarkBar.classList.remove('force-show')
+            this._navHideTimer = null 
+          }, 600)
+        })
+      }
+      
       const container = document.querySelector('.container')
       if (container) container.style.paddingTop = '6px'
     } else {
       nav.classList.remove('autohide')
       nav.classList.remove('force-show')
+      if (this.bookmarkBar) {
+        this.bookmarkBar.classList.remove('autohide')
+        this.bookmarkBar.classList.remove('force-show')
+      }
       const container = document.querySelector('.container')
       if (container) container.style.paddingTop = nav.offsetHeight + 'px'
     }
@@ -324,10 +354,17 @@ class VideoApp {
       interactive: true, placement: 'bottom-end', trigger: 'click', maxWidth: 500, allowHTML: true,
       onShow: async (instance) => {
         const folders = await this.api.getVideoFolders()
+        const showSubfoldersRes = await this.api.getVideoSetting('show_subfolders')
+        // Default to true if not set
+        const showSubfolders = showSubfoldersRes.val === 'false' || showSubfoldersRes.val === false ? false : true
+        
         let rows = folders.length > 0
           ? folders.map(f => `<div class='fp-row'><span class='fp-path'>${f.path}</span><button class='fp-btn fp-reindex' data-path='${f.path}' title='Re-scan'><i class="fa-solid fa-rotate"></i></button><button class='fp-btn fp-disconnect' data-path='${f.path}' title='Disconnect'><i class="fa-solid fa-xmark"></i></button></div>`).join('')
           : `<div class='fp-empty'>No video folders connected</div>`
-        instance.setContent(`<div class='folder-panel'><div class='fp-header'><h4><i class="fa-solid fa-folder-open"></i> Video Folders</h4></div><div class='fp-list'>${rows}</div><div class='fp-actions'><button class='fp-btn fp-connect'><i class="fa-solid fa-folder-plus"></i> Connect a folder</button></div></div>`)
+        
+        const subfolderToggle = `<div class='fp-subfolder-toggle'><label><input type='checkbox' id='fp-show-subfolders' ${showSubfolders ? 'checked' : ''}> <i class="fa-solid fa-folder-tree"></i> Show subfolder filters</label></div>`
+        
+        instance.setContent(`<div class='folder-panel'><div class='fp-header'><h4><i class="fa-solid fa-folder-open"></i> Video Folders</h4></div><div class='fp-list'>${rows}</div>${subfolderToggle}<div class='fp-actions'><button class='fp-btn fp-connect'><i class="fa-solid fa-folder-plus"></i> Connect a folder</button></div></div>`)
         setTimeout(() => {
           const popper = instance.popper
           popper.querySelector('.fp-connect')?.addEventListener('click', async () => {
@@ -338,6 +375,17 @@ class VideoApp {
             if (window.confirm(`Disconnect "${b.dataset.path}"?`)) { await this.api.removeVideoFolder(b.dataset.path); instance.hide(); await this.loadVideos() }
           }))
           popper.querySelectorAll('.fp-reindex').forEach(b => b.addEventListener('click', async () => { instance.hide(); await this.scanFolder(b.dataset.path); await this.loadVideos() }))
+          
+          // Subfolder toggle handler
+          popper.querySelector('#fp-show-subfolders')?.addEventListener('change', async (e) => {
+            const checked = e.target.checked
+            await this.api.setVideoSetting('show_subfolders', checked)
+            if (checked) {
+              await this.refreshBookmarkBar()
+            } else {
+              if (this.bookmarkBar) this.bookmarkBar.classList.add('hidden')
+            }
+          })
         }, 0)
       }
     })
@@ -354,6 +402,98 @@ class VideoApp {
     await this.loadVideos()
   }
 
+  // --- Bookmark Bar ---
+  async initBookmarkBar() {
+    this.bookmarkBar = document.querySelector('#bookmark-bar')
+    if (!this.bookmarkBar) return
+    
+    // Load subfolders and render bookmark bar
+    await this.refreshBookmarkBar()
+  }
+
+  async refreshBookmarkBar() {
+    if (!this.bookmarkBar) return
+    
+    // Position bookmark bar below nav
+    const nav = document.querySelector('nav')
+    if (nav) {
+      const navHeight = nav.offsetHeight
+      this.bookmarkBar.style.top = `${navHeight}px`
+    }
+    
+    // Check if subfolder display is enabled (default to true if not set)
+    const showSubfoldersRes = await this.api.getVideoSetting('show_subfolders')
+    const showSubfolders = showSubfoldersRes.val === 'false' || showSubfoldersRes.val === false ? false : true
+    
+    if (!showSubfolders) {
+      this.bookmarkBar.classList.add('hidden')
+      return
+    }
+    
+    try {
+      const subfolders = await this.api.getVideoSubfolders()
+      
+      if (!subfolders || subfolders.length === 0) {
+        this.bookmarkBar.classList.add('hidden')
+        return
+      }
+      
+      // Show bookmark bar
+      this.bookmarkBar.classList.remove('hidden')
+      
+      // Render subfolder chips
+      const chips = subfolders.map(sf => {
+        // Check if current query has this exact subfolder
+        const currentSubfolder = this.query.match(/subfolder:([^\s]+)/)?.[1] || ''
+        const isActive = currentSubfolder === sf.subfolder
+        
+        // Display only the last part of the path (leaf folder name)
+        const displayName = sf.subfolder.split(/[/\\]/).pop() || sf.subfolder
+        
+        return `<div class='bookmark-chip ${isActive ? 'active' : ''}' data-subfolder='${sf.subfolder}' title='${sf.subfolder} (${sf.count} videos)'>
+          <i class="fa-solid fa-folder"></i>
+          <span>${displayName}</span>
+          <span class='count'>(${sf.count})</span>
+        </div>`
+      }).join('')
+      
+      // Add "All Videos" chip
+      const allActive = !this.query.includes('subfolder:')
+      const allChip = `<div class='bookmark-chip ${allActive ? 'active' : ''}' data-subfolder='__all__' title='Show all videos'>
+        <i class="fa-solid fa-video"></i>
+        <span>All Videos</span>
+      </div>`
+      
+      this.bookmarkBar.innerHTML = allChip + chips
+      
+      // Attach click handlers
+      this.bookmarkBar.querySelectorAll('.bookmark-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const subfolder = chip.dataset.subfolder
+          
+          if (subfolder === '__all__') {
+            // Clear all filters - empty search bar
+            this.query = ''
+            const searchInput = document.querySelector('.search')
+            if (searchInput) searchInput.value = ''
+          } else {
+            // Use only the leaf folder name for the search (LIKE match will find it)
+            const leafName = subfolder.split(/[/\\]/).pop()
+            this.query = `subfolder:${leafName}`
+            const searchInput = document.querySelector('.search')
+            if (searchInput) searchInput.value = this.query
+          }
+          
+          // Reload videos
+          this.loadVideos()
+        })
+      })
+    } catch (e) {
+      console.error('Error loading subfolders:', e)
+      this.bookmarkBar.classList.add('hidden')
+    }
+  }
+
   // --- Load & Render ---
   async loadVideos() {
     const sorter = this.sorters[this.sorterCode] || this.sorters[0]
@@ -362,6 +502,7 @@ class VideoApp {
       this.videos = result.results || []
       this.renderGrid()
       this.updateCount(result.total || this.videos.length)
+      await this.refreshBookmarkBar()
     } catch (e) { console.error('Error loading videos:', e); this.videos = []; this.renderGrid() }
   }
 
@@ -595,7 +736,17 @@ class VideoApp {
     this._viewerOpen = true
     this._showVideo(this._currentIndex)
     const nav = document.querySelector('nav')
-    if (nav) { this._navWasAutoHide = nav.classList.contains('autohide'); if (!this._navWasAutoHide) nav.classList.add('autohide'); nav.classList.remove('force-show') }
+    if (nav) { 
+      this._navWasAutoHide = nav.classList.contains('autohide')
+      if (!this._navWasAutoHide) nav.classList.add('autohide')
+      nav.classList.remove('force-show')
+    }
+    // Also hide bookmark bar during viewer
+    if (this.bookmarkBar) {
+      this._bookmarkWasAutoHide = this.bookmarkBar.classList.contains('autohide')
+      if (!this._bookmarkWasAutoHide) this.bookmarkBar.classList.add('autohide')
+      this.bookmarkBar.classList.remove('force-show')
+    }
     this._keyHandler = (e) => {
       if (e.target.tagName === 'INPUT') return
       if (e.key === 'Escape') this._closeViewer()
@@ -919,6 +1070,14 @@ class VideoApp {
       // Restore nav — re-apply the full auto-hide logic to ensure clean state
       this.applyAutoHideNav()
       this._navWasAutoHide = undefined
+      // Restore bookmark bar state
+      if (this.bookmarkBar && this._bookmarkWasAutoHide !== undefined) {
+        if (!this._bookmarkWasAutoHide) {
+          this.bookmarkBar.classList.remove('autohide')
+          this.bookmarkBar.classList.remove('force-show')
+        }
+        this._bookmarkWasAutoHide = undefined
+      }
       this._resetAllPlayLocks()
     }
     this._viewerOpen = false

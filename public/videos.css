@@ -303,3 +303,153 @@ body.default nav select#sorter option {
   background: white;
   color: black;
 }
+
+/* --- Bookmark Bar --- */
+.bookmark-bar {
+  position: fixed;
+  top: 60px; /* Will be adjusted by JS to match nav height */
+  left: 0;
+  right: 0;
+  z-index: 9998; /* Just below nav */
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  min-height: 40px;
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+/* Theme-specific styling to match nav */
+body.default .bookmark-bar {
+  background: rgba(240,240,240,0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+body.dark .bookmark-bar {
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.bookmark-bar.hidden {
+  display: none !important;
+}
+
+/* Auto-hide behavior - follows nav */
+.bookmark-bar.autohide {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.5s ease 0.3s, opacity 0.5s ease 0.3s;
+}
+
+.bookmark-bar.autohide.force-show {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.bookmark-bar::-webkit-scrollbar {
+  height: 6px;
+}
+
+.bookmark-bar::-webkit-scrollbar-track {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.bookmark-bar::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.4);
+  border-radius: 3px;
+}
+
+.bookmark-bar::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.6);
+}
+
+.bookmark-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(128, 128, 128, 0.1);
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: 16px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.bookmark-chip:hover {
+  background: rgba(128, 128, 128, 0.2);
+  border-color: rgba(128, 128, 128, 0.3);
+}
+
+.bookmark-chip.active {
+  background: rgba(76, 132, 255, 0.2);
+  border-color: rgba(76, 132, 255, 0.4);
+  color: #4c84ff;
+}
+
+.bookmark-chip i {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.bookmark-chip .count {
+  opacity: 0.6;
+  font-size: 0.8em;
+  margin-left: 2px;
+}
+
+.bookmark-chip-add {
+  background: rgba(76, 132, 255, 0.1);
+  border-color: rgba(76, 132, 255, 0.3);
+  color: #4c84ff;
+}
+
+.bookmark-chip-add:hover {
+  background: rgba(76, 132, 255, 0.2);
+  border-color: rgba(76, 132, 255, 0.4);
+}
+
+/* Adjust container padding when bookmark bar is visible */
+body:has(.bookmark-bar:not(.hidden)) .container {
+  padding-top: 108px;
+}
+
+/* Dark theme adjustments */
+body.dark .bookmark-chip {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+body.dark .bookmark-chip:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+body.dark .bookmark-chip.active {
+  background: rgba(76, 132, 255, 0.25);
+  border-color: rgba(76, 132, 255, 0.5);
+  color: #6b9aff;
+}
+
+body.dark .bookmark-chip-add {
+  background: rgba(76, 132, 255, 0.15);
+  border-color: rgba(76, 132, 255, 0.35);
+  color: #6b9aff;
+}
+
+body.dark .bookmark-chip-add:hover {
+  background: rgba(76, 132, 255, 0.25);
+  border-color: rgba(76, 132, 255, 0.45);
+}
