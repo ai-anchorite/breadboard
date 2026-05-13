@@ -121,6 +121,7 @@ class API {
   removeVideoTags(fingerprints, tags) { return this._post('/api/videos/tags/remove', { fingerprints, tags }) }
   getAllVideoTags() { return this._get('/api/videos/tags/all') }
   getVideoSubfolders() { return this._get('/api/videos/subfolders') }
+  getVideoFolderBookmarks() { return this._get('/api/videos/folder-bookmarks') }
 
   deleteVideos(fingerprints) { return this._post('/api/videos/delete', { fingerprints }) }
   restoreVideos(fingerprints) { return this._post('/api/videos/restore', { fingerprints }) }
@@ -128,7 +129,7 @@ class API {
   emptyVideoTrash() { return this._post('/api/videos/trash/empty', {}) }
 
   getVideoFolders() { return this._get('/api/video-folders') }
-  addVideoFolder(path) { return this._post('/api/video-folders', { path }) }
+  addVideoFolder(path, options = {}) { return this._post('/api/video-folders', { path, recursive: options.recursive !== false }) }
   removeVideoFolder(path) { return this._delete('/api/video-folders', { path }) }
 
   getVideoSetting(key) { return this._get(`/api/video-settings/${key}`) }

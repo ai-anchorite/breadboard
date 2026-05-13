@@ -13,8 +13,9 @@ class VideoApp {
     this.theme = { val: THEME || 'default' }
     this.minimal = { val: 'default' }
     this.style = { aspect_ratio: 100, fit: 'cover', grid_mode: 'flex' }
-    this.video_limit = 1000
+    this.video_limit = 0
     this.volume = 50
+    this.viewerPanelHidden = false
     this._zoom = 1
     this._panX = 0
     this._panY = 0
@@ -65,6 +66,9 @@ class VideoApp {
     const confirmRes = await this.api.getVideoSetting('confirm_delete')
     const fitRes = await this.api.getVideoSetting('video_fit')
     const volumeRes = await this.api.getVideoSetting('video_volume')
+    const bookmarkBarRes = await this.api.getVideoSetting('show_bookmark_bar')
+    const legacySubfolderBarRes = bookmarkBarRes.val == null ? await this.api.getVideoSetting('show_subfolders') : { val: null }
+    const viewerPanelRes = await this.api.getVideoSetting('viewer_panel_hidden')
     if (themeRes.val) { this.theme.val = themeRes.val; document.body.className = themeRes.val }
     if (minimalRes.val) this.minimal.val = minimalRes.val
     if (zoomRes.val) this.zoom = parseInt(zoomRes.val)
@@ -74,10 +78,15 @@ class VideoApp {
     const gridRes = await this.api.getVideoSetting('video_grid_mode')
     if (gridRes.val) this.style.grid_mode = gridRes.val
     const limitRes = await this.api.getVideoSetting('video_limit')
-    if (limitRes.val) this.video_limit = parseInt(limitRes.val)
+    this.video_limit = limitRes.val != null ? parseInt(limitRes.val) : 0
     this.confirmDelete = confirmRes.val != null ? (confirmRes.val === 'true' || confirmRes.val === true) : true
     this.style.fit = fitRes.val || 'cover'
     this.volume = volumeRes.val != null ? parseInt(volumeRes.val) : 50
+    this.viewerPanelHidden = viewerPanelRes.val === 'true' || viewerPanelRes.val === true
+    const bookmarkBarVal = bookmarkBarRes.val != null ? bookmarkBarRes.val : legacySubfolderBarRes.val
+    this.showBookmarkBar = bookmarkBarVal === 'false' || bookmarkBarVal === false ? false : true
+    const bookmarkToggle = document.querySelector('#show-bookmark-bar')
+    if (bookmarkToggle) bookmarkToggle.checked = this.showBookmarkBar
     document.body.setAttribute('data-minimal', this.minimal.val)
     this.applyAutoHideNav()
     this.applyCardStyle()
@@ -100,6 +109,21 @@ class VideoApp {
 
   applyFit() {
     document.documentElement.style.setProperty('--video-fit', this.style.fit || 'cover')
+  }
+
+  getGridPresentation() {
+    return this.style.grid_mode === 'masonry' ? 'masonry' : (this.style.fit || 'cover')
+  }
+
+  applyGridPresentation(presentation) {
+    if (presentation === 'masonry') {
+      this.style.grid_mode = 'masonry'
+    } else {
+      this.style.grid_mode = 'flex'
+      this.style.fit = presentation
+    }
+    this.applyGridMode()
+    this.applyFit()
   }
 
   applyAutoHideNav() {
@@ -182,6 +206,20 @@ class VideoApp {
     })
   }
 
+  escapeHTML(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[char]))
+  }
+
+  quoteQueryValue(value) {
+    return `"${String(value ?? '').replace(/"/g, '\\"')}"`
+  }
+
   // --- Nav Events ---
   attachNavEvents() {
     document.querySelector('#prev')?.addEventListener('click', () => history.back())
@@ -192,6 +230,10 @@ class VideoApp {
     document.querySelector('#sorter')?.addEventListener('change', async (e) => { this.sorterCode = parseInt(e.target.value); await this.loadVideos() })
     document.querySelector('.search')?.addEventListener('keyup', (e) => { if (e.key === 'Enter') { this.query = e.target.value; this.loadVideos() } })
     document.querySelector('#sync')?.addEventListener('click', async () => await this.scanAllFolders())
+    document.querySelector('#show-bookmark-bar')?.addEventListener('change', async (e) => {
+      await this.api.setVideoSetting('show_bookmark_bar', e.target.checked)
+      await this.refreshBookmarkBar()
+    })
 
     // Bookmark current search
     document.querySelector('#favorite')?.addEventListener('click', async () => {
@@ -212,7 +254,7 @@ class VideoApp {
   }
 
   initTooltips() {
-    const buttons = ['#prev', '#next', '#sync', '.content-info', '#favorite', '#bookmarked-filters', '#favorited-items', '#folder-option', '#pin', '#settings-option', '#help-option', '#new-window']
+    const buttons = ['#prev', '#next', '#sync', '.content-info', '#favorite', '#bookmarked-filters', '#favorited-items', '#bookmark-bar-toggle', '#folder-option', '#pin', '#settings-option', '#help-option', '#new-window']
     for (const sel of buttons) {
       const el = document.querySelector(sel)
       if (el) tippy(el, { placement: 'bottom-end', interactive: true, content: el.getAttribute('title') })
@@ -354,51 +396,57 @@ class VideoApp {
       interactive: true, placement: 'bottom-end', trigger: 'click', maxWidth: 500, allowHTML: true,
       onShow: async (instance) => {
         const folders = await this.api.getVideoFolders()
-        const showSubfoldersRes = await this.api.getVideoSetting('show_subfolders')
-        // Default to true if not set
-        const showSubfolders = showSubfoldersRes.val === 'false' || showSubfoldersRes.val === false ? false : true
         
         let rows = folders.length > 0
-          ? folders.map(f => `<div class='fp-row'><span class='fp-path'>${f.path}</span><button class='fp-btn fp-reindex' data-path='${f.path}' title='Re-scan'><i class="fa-solid fa-rotate"></i></button><button class='fp-btn fp-disconnect' data-path='${f.path}' title='Disconnect'><i class="fa-solid fa-xmark"></i></button></div>`).join('')
+          ? folders.map(f => {
+            const recursive = f.recursive !== 0 && f.recursive !== false
+            const path = this.escapeHTML(f.path)
+            return `<div class='fp-row'>
+              <span class='fp-path'>${path}</span>
+              <label class='fp-folder-mode' title='Include subfolders'>
+                <input class='fp-recursive' type='checkbox' data-path='${path}' ${recursive ? 'checked' : ''}>
+                <i class="fa-solid fa-folder-tree"></i>
+              </label>
+              <button class='fp-btn fp-reindex' data-path='${path}' data-recursive='${recursive ? 'true' : 'false'}' title='Re-scan'><i class="fa-solid fa-rotate"></i></button>
+              <button class='fp-btn fp-disconnect' data-path='${path}' title='Disconnect'><i class="fa-solid fa-xmark"></i></button>
+            </div>`
+          }).join('')
           : `<div class='fp-empty'>No video folders connected</div>`
         
-        const subfolderToggle = `<div class='fp-subfolder-toggle'><label><input type='checkbox' id='fp-show-subfolders' ${showSubfolders ? 'checked' : ''}> <i class="fa-solid fa-folder-tree"></i> Show subfolder filters</label></div>`
+        const includeSubfolders = `<div class='fp-subfolder-toggle'><label><input type='checkbox' id='fp-include-subfolders' checked> <i class="fa-solid fa-folder-tree"></i> Include subfolders</label></div>`
         
-        instance.setContent(`<div class='folder-panel'><div class='fp-header'><h4><i class="fa-solid fa-folder-open"></i> Video Folders</h4></div><div class='fp-list'>${rows}</div>${subfolderToggle}<div class='fp-actions'><button class='fp-btn fp-connect'><i class="fa-solid fa-folder-plus"></i> Connect a folder</button></div></div>`)
+        instance.setContent(`<div class='folder-panel'><div class='fp-header'><h4><i class="fa-solid fa-folder-open"></i> Video Folders</h4></div><div class='fp-list'>${rows}</div>${includeSubfolders}<div class='fp-actions'><button class='fp-btn fp-connect'><i class="fa-solid fa-folder-plus"></i> Connect a folder</button></div></div>`)
         setTimeout(() => {
           const popper = instance.popper
           popper.querySelector('.fp-connect')?.addEventListener('click', async () => {
             const paths = await this.api.select()
-            if (paths && paths.length > 0) { for (const p of paths) { await this.api.addVideoFolder(p); await this.scanFolder(p) }; instance.hide(); await this.loadVideos() }
+            const recursive = popper.querySelector('#fp-include-subfolders')?.checked !== false
+            if (paths && paths.length > 0) { for (const p of paths) { await this.api.addVideoFolder(p, { recursive }); await this.scanFolder(p, recursive) }; instance.hide(); await this.loadVideos() }
           })
           popper.querySelectorAll('.fp-disconnect').forEach(b => b.addEventListener('click', async () => {
             if (window.confirm(`Disconnect "${b.dataset.path}"?`)) { await this.api.removeVideoFolder(b.dataset.path); instance.hide(); await this.loadVideos() }
           }))
-          popper.querySelectorAll('.fp-reindex').forEach(b => b.addEventListener('click', async () => { instance.hide(); await this.scanFolder(b.dataset.path); await this.loadVideos() }))
-          
-          // Subfolder toggle handler
-          popper.querySelector('#fp-show-subfolders')?.addEventListener('change', async (e) => {
-            const checked = e.target.checked
-            await this.api.setVideoSetting('show_subfolders', checked)
-            if (checked) {
-              await this.refreshBookmarkBar()
-            } else {
-              if (this.bookmarkBar) this.bookmarkBar.classList.add('hidden')
-            }
-          })
+          popper.querySelectorAll('.fp-recursive').forEach(input => input.addEventListener('change', async () => {
+            const recursive = input.checked
+            await this.api.addVideoFolder(input.dataset.path, { recursive })
+            await this.scanFolder(input.dataset.path, recursive)
+            instance.hide()
+            await this.loadVideos()
+          }))
+          popper.querySelectorAll('.fp-reindex').forEach(b => b.addEventListener('click', async () => { instance.hide(); await this.scanFolder(b.dataset.path, b.dataset.recursive !== 'false'); await this.loadVideos() }))
         }, 0)
       }
     })
   }
 
-  async scanFolder(folderPath) {
+  async scanFolder(folderPath, recursive = true) {
     if (!window.electronAPI?.scanVideos) return
-    try { await window.electronAPI.scanVideos(folderPath, { recursive: true }) } catch (e) { console.error('Scan error:', e) }
+    try { await window.electronAPI.scanVideos(folderPath, { recursive }) } catch (e) { console.error('Scan error:', e) }
   }
 
   async scanAllFolders() {
     const folders = await this.api.getVideoFolders()
-    for (const f of folders) await this.scanFolder(f.path)
+    for (const f of folders) await this.scanFolder(f.path, f.recursive !== 0 && f.recursive !== false)
     await this.loadVideos()
   }
 
@@ -421,76 +469,135 @@ class VideoApp {
       this.bookmarkBar.style.top = `${navHeight}px`
     }
     
-    // Check if subfolder display is enabled (default to true if not set)
-    const showSubfoldersRes = await this.api.getVideoSetting('show_subfolders')
-    const showSubfolders = showSubfoldersRes.val === 'false' || showSubfoldersRes.val === false ? false : true
+    const bookmarkToggle = document.querySelector('#show-bookmark-bar')
+    const showBookmarkBarRes = await this.api.getVideoSetting('show_bookmark_bar')
+    const legacySubfolderBarRes = showBookmarkBarRes.val == null ? await this.api.getVideoSetting('show_subfolders') : { val: null }
+    const bookmarkBarVal = showBookmarkBarRes.val != null ? showBookmarkBarRes.val : legacySubfolderBarRes.val
+    const showBookmarkBar = bookmarkBarVal === 'false' || bookmarkBarVal === false ? false : true
+    this.showBookmarkBar = showBookmarkBar
+    if (bookmarkToggle) bookmarkToggle.checked = showBookmarkBar
     
-    if (!showSubfolders) {
+    if (!showBookmarkBar) {
       this.bookmarkBar.classList.add('hidden')
+      this.closeBookmarkMenu()
       return
     }
     
     try {
-      const subfolders = await this.api.getVideoSubfolders()
+      const folders = await this.api.getVideoFolderBookmarks()
       
-      if (!subfolders || subfolders.length === 0) {
+      if (!folders || folders.length === 0) {
         this.bookmarkBar.classList.add('hidden')
+        this.closeBookmarkMenu()
         return
       }
       
-      // Show bookmark bar
       this.bookmarkBar.classList.remove('hidden')
       
-      // Render subfolder chips
-      const chips = subfolders.map(sf => {
-        // Check if current query has this exact subfolder
-        const currentSubfolder = this.query.match(/subfolder:([^\s]+)/)?.[1] || ''
-        const isActive = currentSubfolder === sf.subfolder
-        
-        // Display only the last part of the path (leaf folder name)
-        const displayName = sf.subfolder.split(/[/\\]/).pop() || sf.subfolder
-        
-        return `<div class='bookmark-chip ${isActive ? 'active' : ''}' data-subfolder='${sf.subfolder}' title='${sf.subfolder} (${sf.count} videos)'>
+      const chips = folders.map((folder, index) => {
+        const rootQuery = `root_path:${this.quoteQueryValue(folder.path)}`
+        const isActive = this.query.includes(rootQuery)
+        const name = this.escapeHTML(folder.name || folder.path)
+        const path = this.escapeHTML(folder.path)
+        const subCount = Array.isArray(folder.subfolders) ? folder.subfolders.length : 0
+        const menuHint = subCount > 0 ? 'Right-click for subfolders' : 'No indexed subfolders'
+        return `<div class='bookmark-chip bookmark-folder-chip ${isActive ? 'active' : ''}' data-folder-index='${index}' title='${path} (${folder.count || 0} videos). ${menuHint}'>
           <i class="fa-solid fa-folder"></i>
-          <span>${displayName}</span>
-          <span class='count'>(${sf.count})</span>
+          <span>${name}</span>
+          <span class='count'>(${folder.count || 0})</span>
+          ${subCount > 0 ? `<i class="fa-solid fa-caret-down bookmark-menu-caret"></i>` : ''}
         </div>`
       }).join('')
       
-      // Add "All Videos" chip
-      const allActive = !this.query.includes('subfolder:')
+      const allActive = !this.query.includes('subfolder:') && !this.query.includes('root_path:')
       const allChip = `<div class='bookmark-chip ${allActive ? 'active' : ''}' data-subfolder='__all__' title='Show all videos'>
         <i class="fa-solid fa-video"></i>
         <span>All Videos</span>
       </div>`
       
       this.bookmarkBar.innerHTML = allChip + chips
+      this._bookmarkFolders = folders
       
-      // Attach click handlers
       this.bookmarkBar.querySelectorAll('.bookmark-chip').forEach(chip => {
-        chip.addEventListener('click', () => {
+        chip.addEventListener('click', (e) => {
+          e.preventDefault()
           const subfolder = chip.dataset.subfolder
           
           if (subfolder === '__all__') {
-            // Clear all filters - empty search bar
             this.query = ''
             const searchInput = document.querySelector('.search')
             if (searchInput) searchInput.value = ''
           } else {
-            // Use only the leaf folder name for the search (LIKE match will find it)
-            const leafName = subfolder.split(/[/\\]/).pop()
-            this.query = `subfolder:${leafName}`
+            const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
+            if (!folder) return
+            this.query = `root_path:${this.quoteQueryValue(folder.path)}`
             const searchInput = document.querySelector('.search')
             if (searchInput) searchInput.value = this.query
           }
           
-          // Reload videos
+          this.closeBookmarkMenu()
           this.loadVideos()
+        })
+        chip.addEventListener('contextmenu', (e) => {
+          if (!chip.classList.contains('bookmark-folder-chip')) return
+          e.preventDefault()
+          const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
+          if (folder) this.openBookmarkMenu(folder, chip)
         })
       })
     } catch (e) {
       console.error('Error loading subfolders:', e)
       this.bookmarkBar.classList.add('hidden')
+    }
+  }
+
+  openBookmarkMenu(folder, chip) {
+    this.closeBookmarkMenu()
+    const subfolders = Array.isArray(folder.subfolders) ? folder.subfolders : []
+    if (subfolders.length === 0) return
+
+    const rect = chip.getBoundingClientRect()
+    const menu = document.createElement('div')
+    menu.className = 'bookmark-folder-menu'
+    menu.style.left = `${Math.max(8, rect.left)}px`
+    menu.style.top = `${rect.bottom + 6}px`
+    menu.innerHTML = subfolders.map((sf) => {
+      const leaf = this.escapeHTML(sf.subfolder.split(/[/\\]/).pop() || sf.subfolder)
+      const full = this.escapeHTML(sf.subfolder)
+      return `<button class='bookmark-folder-menu-item' data-subfolder='${full}' title='${full}'>
+        <i class="fa-regular fa-folder"></i>
+        <span>${leaf}</span>
+        <span class='count'>${sf.count}</span>
+      </button>`
+    }).join('')
+
+    menu.querySelectorAll('.bookmark-folder-menu-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const subfolder = item.dataset.subfolder
+        this.query = `root_path:${this.quoteQueryValue(folder.path)} subfolder:${this.quoteQueryValue(subfolder)}`
+        const searchInput = document.querySelector('.search')
+        if (searchInput) searchInput.value = this.query
+        this.closeBookmarkMenu()
+        this.loadVideos()
+      })
+    })
+
+    document.body.appendChild(menu)
+    this._bookmarkMenu = menu
+    this._bookmarkMenuCloser = (e) => {
+      if (this._bookmarkMenu && !this._bookmarkMenu.contains(e.target)) this.closeBookmarkMenu()
+    }
+    setTimeout(() => document.addEventListener('mousedown', this._bookmarkMenuCloser), 0)
+  }
+
+  closeBookmarkMenu() {
+    if (this._bookmarkMenuCloser) {
+      document.removeEventListener('mousedown', this._bookmarkMenuCloser)
+      this._bookmarkMenuCloser = null
+    }
+    if (this._bookmarkMenu) {
+      this._bookmarkMenu.remove()
+      this._bookmarkMenu = null
     }
   }
 
@@ -807,7 +914,7 @@ class VideoApp {
           <button class='bb-tb-btn bb-tb-close' title='Close (Esc)'><i class="fa-solid fa-xmark"></i></button>
         </div>
       </div>
-      <div class='bb-viewer-panel' id='bb-viewer-panel'>
+      <div class='bb-viewer-panel ${this.viewerPanelHidden ? 'collapsed' : ''}' id='bb-viewer-panel'>
         <div class='panel-header'><span>Video Info</span><span class='bb-viewer-counter-panel'></span></div>
         <div class='panel-body'></div>
       </div>`
@@ -865,6 +972,7 @@ class VideoApp {
     })
     $('.bb-viewer-panel').addEventListener('click', (e) => e.stopPropagation())
     $('.bb-viewer-toolbar').addEventListener('click', (e) => e.stopPropagation())
+    this._syncPanelToggleIcon()
   }
 
   _navigateViewer(dir) {
@@ -1022,7 +1130,12 @@ class VideoApp {
   // --- Panel ---
   _togglePanel() {
     const p = document.getElementById('bb-viewer-panel'); if (!p) return; p.classList.toggle('collapsed')
-    const btn = document.querySelector('.bb-tb-panel-toggle i'); if (btn) btn.style.opacity = p.classList.contains('collapsed') ? '0.4' : '1'
+    this._syncPanelToggleIcon()
+  }
+  _syncPanelToggleIcon() {
+    const p = document.getElementById('bb-viewer-panel')
+    const btn = document.querySelector('.bb-tb-panel-toggle i')
+    if (btn && p) btn.style.opacity = p.classList.contains('collapsed') ? '0.4' : '1'
   }
   async _loadPanel(data) {
     const body = document.querySelector('#bb-viewer-panel .panel-body'); if (!body) return
@@ -1101,26 +1214,48 @@ class VideoApp {
   // =============================================
   // Settings Sidebar
   // =============================================
-  async toggleSettings() {
+  async toggleSettings(force) {
     const sidebar = document.getElementById('settings-sidebar'); if (!sidebar) return
-    if (sidebar.classList.contains('hidden')) {
+    const shouldOpen = force === true || (force !== false && sidebar.classList.contains('hidden'))
+    if (shouldOpen) {
       const nav = document.querySelector('nav'); const navH = nav ? nav.offsetHeight - 1 : 0
       sidebar.style.top = navH + 'px'; sidebar.style.height = `calc(100vh - ${navH}px)`
       await this.renderSettings(sidebar); sidebar.classList.remove('hidden')
-    } else { sidebar.classList.add('hidden') }
+      this.attachSettingsOutsideClose(sidebar)
+    } else {
+      sidebar.classList.add('hidden')
+      this.detachSettingsOutsideClose()
+    }
+  }
+
+  attachSettingsOutsideClose(sidebar) {
+    this.detachSettingsOutsideClose()
+    this._settingsOutsideHandler = (e) => {
+      if (sidebar.classList.contains('hidden')) return
+      if (sidebar.contains(e.target)) return
+      if (e.target.closest?.('#settings-option')) return
+      this.toggleSettings(false)
+    }
+    setTimeout(() => document.addEventListener('mousedown', this._settingsOutsideHandler), 0)
+  }
+
+  detachSettingsOutsideClose() {
+    if (!this._settingsOutsideHandler) return
+    document.removeEventListener('mousedown', this._settingsOutsideHandler)
+    this._settingsOutsideHandler = null
   }
 
   async renderSettings(sidebar) {
-    const zoom = this.zoom || 100, minimal = this.minimal.val || 'default', theme = this.theme.val || 'default', fit = this.style.fit || 'cover', vol = this.volume != null ? this.volume : 50, gridMode = this.style.grid_mode || 'flex', aspect = this.style.aspect_ratio || 100, vidLimit = this.video_limit || 1000
+    const zoom = this.zoom || 100, minimal = this.minimal.val || 'default', theme = this.theme.val || 'default', presentation = this.getGridPresentation(), vol = this.volume != null ? this.volume : 50, aspect = this.style.aspect_ratio || 100, vidLimit = this.video_limit != null ? this.video_limit : 0, limitLabel = vidLimit === 0 ? 'No limit' : vidLimit
     sidebar.innerHTML = `
       <div class='sb-header'><h3><i class="fa-solid fa-gear"></i> Video Settings</h3><button class='sb-close' title='Close'><i class="fa-solid fa-xmark"></i></button></div>
       <div class='sb-body'>
         <div class='sb-section'><h4><i class="fa-solid fa-palette"></i> Theme</h4><div class='sb-row sb-theme-row'><button class='sb-btn ${theme === "dark" ? "active" : ""}' data-theme='dark'><i class="fa-solid fa-moon"></i> Dark</button><button class='sb-btn ${theme === "default" ? "active" : ""}' data-theme='default'><i class="fa-regular fa-sun"></i> Light</button></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-eye-slash"></i> Auto-hide Nav</h4><div class='sb-row'><label><input type='checkbox' id='sb-autohide-nav' ${this.autoHideNav ? 'checked' : ''}> Hide nav bar until hover</label></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-id-card"></i> Card Header</h4><div class='sb-row sb-minimal-row'><label><input type='radio' name='sb-minimal' value='default' ${minimal === 'default' ? 'checked' : ''}> Always</label><label><input type='radio' name='sb-minimal' value='minimal' ${minimal === 'minimal' ? 'checked' : ''}> On hover</label><label><input type='radio' name='sb-minimal' value='none' ${minimal === 'none' ? 'checked' : ''}> Hidden</label></div></div>
-        <div class='sb-section'><h4><i class="fa-solid fa-magnifying-glass"></i> Card Size</h4><div class='sb-row'><span class='sb-label'>Width <span class='sb-val' id='sb-zoom-val'>${zoom}%</span></span><input type='range' id='sb-zoom' min='20' max='600' value='${zoom}' step='1'></div><div class='sb-row'><span class='sb-label'>Aspect <span class='sb-val' id='sb-aspect-val'>${aspect}%</span></span><input type='range' id='sb-aspect' min='40' max='250' value='${aspect}' step='1'></div><div class='sb-row sb-fit-row'><label><input type='radio' name='sb-fit' value='contain' ${fit === 'contain' ? 'checked' : ''}> Contain</label><label><input type='radio' name='sb-fit' value='cover' ${fit === 'cover' ? 'checked' : ''}> Cover</label></div></div>
-        <div class='sb-section'><h4><i class="fa-solid fa-border-all"></i> Grid Layout</h4><div class='sb-row sb-grid-row'><label><input type='radio' name='sb-grid-mode' value='flex' ${gridMode === 'flex' ? 'checked' : ''}> Flex Grid</label><label><input type='radio' name='sb-grid-mode' value='masonry' ${gridMode === 'masonry' ? 'checked' : ''}> Masonry</label></div></div>
-        <div class='sb-section'><h4><i class="fa-solid fa-list-ol"></i> Video Limit</h4><div class='sb-row'><span class='sb-label'>Show <span class='sb-val' id='sb-limit-val'>${vidLimit}</span> videos</span><input type='range' id='sb-limit' min='500' max='3000' value='${vidLimit}' step='500'></div></div>
+        <div class='sb-section'><h4><i class="fa-solid fa-border-all"></i> Grid Layout</h4><div class='sb-row'><span class='sb-label'>Scale <span class='sb-val' id='sb-zoom-val'>${zoom}%</span></span><input type='range' id='sb-zoom' min='20' max='600' value='${zoom}' step='1'></div><div class='sb-row sb-aspect-row ${presentation === 'masonry' ? 'hidden' : ''}'><span class='sb-label'>Aspect <span class='sb-val' id='sb-aspect-val'>${aspect}%</span></span><input type='range' id='sb-aspect' min='40' max='250' value='${aspect}' step='1'></div><div class='sb-row sb-fit-row'><label><input type='radio' name='sb-presentation' value='contain' ${presentation === 'contain' ? 'checked' : ''}> Contain</label><label><input type='radio' name='sb-presentation' value='cover' ${presentation === 'cover' ? 'checked' : ''}> Cover</label><label><input type='radio' name='sb-presentation' value='masonry' ${presentation === 'masonry' ? 'checked' : ''}> Masonry</label></div></div>
+        <div class='sb-section'><h4><i class="fa-solid fa-list-ol"></i> Video Limit</h4><div class='sb-row'><span class='sb-label'>Show <span class='sb-val' id='sb-limit-val'>${limitLabel}</span></span><input type='range' id='sb-limit' min='0' max='5000' value='${vidLimit}' step='500'></div></div>
+        <div class='sb-section'><h4><i class="fa-solid fa-circle-info"></i> Video Viewer</h4><div class='sb-row'><label><input type='checkbox' id='sb-viewer-panel-hidden' ${this.viewerPanelHidden ? 'checked' : ''}> Start with info panel hidden</label></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-volume-high"></i> Playback Volume</h4><div class='sb-row'><span class='sb-label'>Volume <span class='sb-val' id='sb-vol-val'>${vol}%</span></span><input type='range' id='sb-volume' min='0' max='100' value='${vol}' step='5'></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-rotate"></i> Re-index</h4><button class='sb-btn sb-reindex'><i class="fa-solid fa-rotate"></i> Re-index from Scratch</button></div>
         <div class='sb-section'><h4><i class="fa-solid fa-trash-can"></i> Deleted Files</h4><div class='sb-row'><label><input type='checkbox' id='sb-confirm-delete' ${this.confirmDelete ? 'checked' : ''}> Ask before deleting</label></div><div class='sb-row sb-trash-info'><span class='sb-label'>Loading...</span></div><div class='sb-row sb-trash-actions' style='display:none'><button class='sb-btn sb-open-trash'><i class="fa-regular fa-folder-open"></i> Open Folder</button><button class='sb-btn sb-empty-trash' style='color:#e55'><i class="fa-solid fa-trash"></i> Empty Trash</button></div></div>
@@ -1139,16 +1274,20 @@ class VideoApp {
     }))
     sidebar.querySelector('#sb-autohide-nav')?.addEventListener('change', async (e) => { this.autoHideNav = e.target.checked; await this.api.setVideoSetting('autohide_nav', e.target.checked); this.applyAutoHideNav() })
     sidebar.querySelector('#sb-confirm-delete')?.addEventListener('change', async (e) => { this.confirmDelete = e.target.checked; await this.api.setVideoSetting('confirm_delete', e.target.checked) })
+    sidebar.querySelector('#sb-viewer-panel-hidden')?.addEventListener('change', async (e) => { this.viewerPanelHidden = e.target.checked; await this.api.setVideoSetting('viewer_panel_hidden', e.target.checked) })
     sidebar.querySelectorAll('[name=sb-minimal]').forEach(el => el.addEventListener('change', async () => { await this.api.setVideoSetting('minimal', el.value); this.minimal.val = el.value; document.body.setAttribute('data-minimal', el.value) }))
     sidebar.querySelector('#sb-zoom')?.addEventListener('input', async (e) => { const val = parseInt(e.target.value); sidebar.querySelector('#sb-zoom-val').textContent = val + '%'; await this.api.setVideoSetting('video_zoom', val); this.zoom = val; this.applyCardStyle() })
     // Aspect ratio
     sidebar.querySelector('#sb-aspect')?.addEventListener('input', async (e) => { const val = parseInt(e.target.value); sidebar.querySelector('#sb-aspect-val').textContent = val + '%'; await this.api.setVideoSetting('video_aspect', val); this.style.aspect_ratio = val; this.applyCardStyle() })
-    // Fit mode
-    sidebar.querySelectorAll('[name=sb-fit]').forEach(el => el.addEventListener('change', async () => { await this.api.setVideoSetting('video_fit', el.value); this.style.fit = el.value; this.applyFit() }))
-    // Grid mode
-    sidebar.querySelectorAll('[name=sb-grid-mode]').forEach(el => el.addEventListener('change', async () => { await this.api.setVideoSetting('video_grid_mode', el.value); this.style.grid_mode = el.value; this.applyGridMode() }))
+    sidebar.querySelectorAll('[name=sb-presentation]').forEach(el => el.addEventListener('change', async () => {
+      const presentation = el.value
+      this.applyGridPresentation(presentation)
+      await this.api.setVideoSetting('video_grid_mode', this.style.grid_mode)
+      if (presentation !== 'masonry') await this.api.setVideoSetting('video_fit', presentation)
+      sidebar.querySelector('.sb-aspect-row')?.classList.toggle('hidden', presentation === 'masonry')
+    }))
     // Video limit
-    sidebar.querySelector('#sb-limit')?.addEventListener('input', async (e) => { const val = parseInt(e.target.value); sidebar.querySelector('#sb-limit-val').textContent = val; await this.api.setVideoSetting('video_limit', val); this.video_limit = val })
+    sidebar.querySelector('#sb-limit')?.addEventListener('input', async (e) => { const val = parseInt(e.target.value); sidebar.querySelector('#sb-limit-val').textContent = val === 0 ? 'No limit' : val; await this.api.setVideoSetting('video_limit', val); this.video_limit = val })
     sidebar.querySelector('#sb-limit')?.addEventListener('change', async () => { await this.loadVideos() })
     // Volume
     sidebar.querySelector('#sb-volume')?.addEventListener('input', async (e) => {

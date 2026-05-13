@@ -225,6 +225,10 @@ class VideoScanner {
       onProgress({ type: 'start', path: dirPath });
     }
 
+    if (!recursive && this.db.removeSubfolderVideos) {
+      this.db.removeSubfolderVideos(rootPath);
+    }
+
     await scan(dirPath);
 
     if (onProgress) {

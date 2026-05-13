@@ -907,6 +907,12 @@ class BreadboardServer {
       res.json(subfolders);
     })
 
+    app.get("/api/videos/folder-bookmarks", (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const folders = this.config.videoDb.getFolderBookmarks();
+      res.json(folders);
+    })
+
     app.post("/api/videos/tags/add", express.json(), (req, res) => {
       if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
       const { fingerprints, tags } = req.body;
@@ -972,9 +978,9 @@ class BreadboardServer {
 
     app.post("/api/video-folders", express.json(), (req, res) => {
       if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
-      const { path: folderPath } = req.body;
+      const { path: folderPath, recursive } = req.body;
       if (!folderPath) return res.status(400).json({ error: 'path required' });
-      this.config.videoDb.addFolder(folderPath);
+      this.config.videoDb.addFolder(folderPath, { recursive });
       res.json({ success: true });
     })
 

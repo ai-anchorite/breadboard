@@ -2091,6 +2091,31 @@ body.default .sb-btn.active { background: royalblue; color: white; border-color:
   opacity: 0.7;
 }
 
+.fp-folder-mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  color: rgba(128,128,128,0.85);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.fp-folder-mode input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fp-folder-mode i {
+  opacity: 0.35;
+}
+
+.fp-folder-mode input:checked + i {
+  opacity: 1;
+  color: cornflowerblue;
+}
+
 /* --- Custom Confirm Dialog --- */
 .bb-confirm-overlay {
   position: fixed;

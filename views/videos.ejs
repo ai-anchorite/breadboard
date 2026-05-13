@@ -52,6 +52,10 @@
         </div>
       </div>
       <div class='nav-unit nav-actions'>
+        <label id='bookmark-bar-toggle' class='nav-checkbox-toggle' title='show or hide the folder bookmark bar'>
+          <input type='checkbox' id='show-bookmark-bar' checked>
+          <i class="fa-solid fa-bookmark"></i>
+        </label>
         <button id='folder-option' title="manage video folders"><i class="fa-solid fa-folder-open"></i></button>
         <% if (agent === "electron") { %>
           <button id='pin' title='pin the window always on top'><i class="fa-solid fa-thumbtack"></i></button>

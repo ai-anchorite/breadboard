@@ -304,6 +304,32 @@ body.default nav select#sorter option {
   color: black;
 }
 
+.nav-checkbox-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  opacity: 0.86;
+}
+
+.nav-checkbox-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nav-checkbox-toggle i {
+  font-size: 0.95rem;
+  opacity: 0.48;
+}
+
+.nav-checkbox-toggle input:checked + i {
+  opacity: 1;
+  color: #4c84ff;
+}
+
 /* --- Bookmark Bar --- */
 .bookmark-bar {
   position: fixed;
@@ -408,6 +434,61 @@ body.dark .bookmark-bar {
   opacity: 0.6;
   font-size: 0.8em;
   margin-left: 2px;
+}
+
+.bookmark-menu-caret {
+  margin-left: 2px;
+  font-size: 0.68rem !important;
+}
+
+.bookmark-folder-menu {
+  position: fixed;
+  z-index: 10050;
+  min-width: 240px;
+  max-width: min(520px, calc(100vw - 16px));
+  max-height: min(560px, calc(100vh - 120px));
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 8px;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+}
+
+body.default .bookmark-folder-menu {
+  background: rgba(248,248,248,0.95);
+  border: 1px solid rgba(0,0,0,0.12);
+  color: #151515;
+}
+
+body.dark .bookmark-folder-menu {
+  background: rgba(24,24,28,0.96);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #f2f2f2;
+}
+
+.bookmark-folder-menu-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.bookmark-folder-menu-item span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-folder-menu-item:hover {
+  background: rgba(76, 132, 255, 0.16);
 }
 
 .bookmark-chip-add {

@@ -73,6 +73,7 @@ class VideoDatabase {
       CREATE TABLE IF NOT EXISTS folders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         path TEXT NOT NULL UNIQUE,
+        recursive INTEGER NOT NULL DEFAULT 1,
         added_at INTEGER NOT NULL
       );
 
@@ -90,7 +91,6 @@ class VideoDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_videos_path ON videos(file_path);
       CREATE INDEX IF NOT EXISTS idx_videos_filename ON videos(filename);
-      CREATE INDEX IF NOT EXISTS idx_videos_subfolder ON videos(subfolder);
       CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_id);
       CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at);
     `);
@@ -105,6 +105,9 @@ class VideoDatabase {
     try { this.db.exec('ALTER TABLE videos ADD COLUMN video_codec TEXT'); } catch (e) { /* already exists */ }
     try { this.db.exec('ALTER TABLE videos ADD COLUMN audio_codec TEXT'); } catch (e) { /* already exists */ }
     try { this.db.exec('ALTER TABLE videos ADD COLUMN playback_strategy TEXT'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE folders ADD COLUMN recursive INTEGER NOT NULL DEFAULT 1'); } catch (e) { /* already exists */ }
+    try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_videos_root_path ON videos(root_path)'); } catch (e) { /* column unavailable */ }
+    try { this.db.exec('CREATE INDEX IF NOT EXISTS idx_videos_subfolder ON videos(subfolder)'); } catch (e) { /* column unavailable */ }
 
     console.log('Video database initialized:', this.dbPath);
   }
@@ -365,15 +368,29 @@ class VideoDatabase {
     return this.db.prepare('SELECT * FROM folders ORDER BY added_at DESC').all();
   }
 
-  addFolder(folderPath) {
+  addFolder(folderPath, options = {}) {
     const now = Date.now();
-    this.db.prepare('INSERT OR IGNORE INTO folders (path, added_at) VALUES (?, ?)').run(folderPath, now);
+    const recursive = options.recursive === false || options.recursive === 0 || options.recursive === 'false' ? 0 : 1;
+    this.db.prepare(`
+      INSERT INTO folders (path, recursive, added_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(path) DO UPDATE SET recursive = excluded.recursive
+    `).run(folderPath, recursive, now);
   }
 
   removeFolder(folderPath) {
     this.db.prepare('DELETE FROM folders WHERE path = ?').run(folderPath);
     // Remove videos from this folder
     this.db.prepare("DELETE FROM videos WHERE file_path LIKE ? || '%'").run(folderPath);
+  }
+
+  removeSubfolderVideos(rootPath) {
+    this.db.prepare(`
+      DELETE FROM videos
+      WHERE root_path = ?
+        AND subfolder IS NOT NULL
+        AND subfolder != ''
+    `).run(rootPath);
   }
 
   // --- Settings ---
@@ -388,6 +405,53 @@ class VideoDatabase {
       .run(key, String(val));
   }
 
+  _tokenizeQuery(query) {
+    const tokens = [];
+    let current = '';
+    let inQuote = false;
+    let escaped = false;
+
+    for (const char of query) {
+      if (escaped) {
+        current += char;
+        escaped = false;
+        continue;
+      }
+
+      if (char === '\\' && inQuote) {
+        current += char;
+        escaped = true;
+        continue;
+      }
+
+      if (char === '"') {
+        inQuote = !inQuote;
+        current += char;
+        continue;
+      }
+
+      if (/\s/.test(char) && !inQuote) {
+        if (current) {
+          tokens.push(current);
+          current = '';
+        }
+        continue;
+      }
+
+      current += char;
+    }
+
+    if (current) tokens.push(current);
+    return tokens;
+  }
+
+  _stripQueryQuotes(value) {
+    if (value && value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      return value.slice(1, -1).replace(/\\"/g, '"');
+    }
+    return value;
+  }
+
   // --- Search ---
 
   search(query, options = {}) {
@@ -397,7 +461,7 @@ class VideoDatabase {
     let params = [];
 
     if (query && query.trim()) {
-      const tokens = query.trim().split(/\s+/);
+      const tokens = this._tokenizeQuery(query.trim());
       for (const token of tokens) {
         const negated = token.startsWith('-');
         const clean = negated ? token.slice(1) : token;
@@ -405,7 +469,8 @@ class VideoDatabase {
         // Field filters
         const fieldMatch = clean.match(/^(\w+):(.+)$/);
         if (fieldMatch) {
-          const [, field, value] = fieldMatch;
+          const [, field, rawValue] = fieldMatch;
+          const value = this._stripQueryQuotes(rawValue);
           const op = negated ? 'NOT LIKE' : 'LIKE';
 
           if (field === 'tag') {
@@ -413,6 +478,9 @@ class VideoDatabase {
               ? `fingerprint NOT IN (SELECT vt.fingerprint FROM video_tags vt JOIN tags t ON t.id = vt.tag_id WHERE t.name = ?)`
               : `fingerprint IN (SELECT vt.fingerprint FROM video_tags vt JOIN tags t ON t.id = vt.tag_id WHERE t.name = ?)`;
             where.push(sub);
+            params.push(value);
+          } else if (field === 'root_path') {
+            where.push(`root_path ${negated ? '!=' : '='} ?`);
             params.push(value);
           } else if (['filename', 'file_path', 'subfolder'].includes(field)) {
             where.push(`${field} ${op} ?`);
@@ -456,9 +524,17 @@ class VideoDatabase {
     const sortCol = sortMap[sort] || 'created_at';
     const dir = direction >= 0 ? 'ASC' : 'DESC';
     const countRow = this.db.prepare(`SELECT COUNT(*) as count FROM videos ${whereClause}`).get(...params);
-    const videos = this.db.prepare(
-      `SELECT * FROM videos ${whereClause} ORDER BY ${sortCol} ${dir} LIMIT ? OFFSET ?`
-    ).all(...params, limit, offset);
+    const baseSql = `SELECT * FROM videos ${whereClause} ORDER BY ${sortCol} ${dir}`;
+    const safeLimit = Number(limit);
+    const safeOffset = Number(offset) || 0;
+    let videos;
+    if (safeLimit > 0) {
+      videos = this.db.prepare(`${baseSql} LIMIT ? OFFSET ?`).all(...params, safeLimit, safeOffset);
+    } else if (safeOffset > 0) {
+      videos = this.db.prepare(`${baseSql} LIMIT -1 OFFSET ?`).all(...params, safeOffset);
+    } else {
+      videos = this.db.prepare(baseSql).all(...params);
+    }
 
     // Attach tags to each video
     const results = videos.map(v => {
@@ -576,6 +652,42 @@ class VideoDatabase {
       ORDER BY subfolder ASC
     `).all();
     return rows;
+  }
+
+  getFolderBookmarks() {
+    const folders = this.getFolders();
+    const counts = this.db.prepare(`
+      SELECT root_path, COUNT(*) as count
+      FROM videos
+      WHERE root_path IS NOT NULL AND root_path != ''
+      GROUP BY root_path
+    `).all();
+    const subfolders = this.db.prepare(`
+      SELECT root_path, subfolder, COUNT(*) as count
+      FROM videos
+      WHERE root_path IS NOT NULL AND root_path != ''
+        AND subfolder IS NOT NULL AND subfolder != ''
+      GROUP BY root_path, subfolder
+      ORDER BY root_path ASC, subfolder ASC
+    `).all();
+
+    const countByRoot = new Map(counts.map((row) => [row.root_path, row.count]));
+    const subfoldersByRoot = new Map();
+    for (const row of subfolders) {
+      if (!subfoldersByRoot.has(row.root_path)) subfoldersByRoot.set(row.root_path, []);
+      subfoldersByRoot.get(row.root_path).push({
+        subfolder: row.subfolder,
+        count: row.count,
+      });
+    }
+
+    return folders.map((folder) => ({
+      ...folder,
+      name: path.basename(folder.path) || folder.path,
+      recursive: folder.recursive !== 0,
+      count: countByRoot.get(folder.path) || 0,
+      subfolders: subfoldersByRoot.get(folder.path) || [],
+    }));
   }
 
   close() {
