@@ -1,6 +1,10 @@
 class Navbar {
   constructor(app) {
     this.app = app
+    this._debouncedApplyStyle = this._debounce(() => {
+      this.app.applyCardStyle()
+      this.app.zoomer.resized()
+    }, 60)
     this.sorters = [
       { direction: -1, column: "btime", compare: 0 },
       { direction: 1, column: "btime", compare: 0 },
@@ -95,11 +99,12 @@ class Navbar {
     const zoom = this.app.zoom || 100
     const style = this.app.style || {}
     const aspect = style.aspect_ratio || 100
-    const fit = style.fit || 'contain'
-    const expWidth = style.expanded_width || 33
+    const presentation = this.app.getGridPresentation()
     const ssInterval = style.slideshow_interval || 3000
     const minimal = this.app.minimal ? this.app.minimal.val : 'default'
     const theme = this.app.theme ? this.app.theme.val : 'default'
+    const imgLimit = this.app.image_limit != null ? this.app.image_limit : 0
+    const limitLabel = imgLimit === 0 ? 'No limit' : imgLimit
 
     sidebar.innerHTML = `
       <div class='sb-header'>
@@ -133,19 +138,34 @@ class Navbar {
         </div>
 
         <div class='sb-section'>
-          <h4><i class="fa-solid fa-magnifying-glass"></i> Card Size</h4>
+          <h4><i class="fa-solid fa-border-all"></i> Grid Layout</h4>
           <div class='sb-row'>
-            <span class='sb-label'>Zoom <span class='sb-val' id='sb-zoom-val'>${zoom}%</span></span>
+            <span class='sb-label'>Scale <span class='sb-val' id='sb-zoom-val'>${zoom}%</span></span>
             <input type='range' id='sb-zoom' min='20' max='600' value='${zoom}' step='1'>
           </div>
-          <div class='sb-row'>
-            <span class='sb-label'>Aspect ratio <span class='sb-val' id='sb-aspect-val'>${aspect}%</span></span>
-            <input type='range' id='sb-aspect' min='20' max='300' value='${aspect}' step='1'>
+          <div class='sb-row sb-aspect-row ${presentation === 'masonry' ? 'hidden' : ''}'>
+            <span class='sb-label'>Aspect <span class='sb-val' id='sb-aspect-val'>${aspect}%</span></span>
+            <input type='range' id='sb-aspect' min='40' max='250' value='${aspect}' step='1'>
           </div>
           <div class='sb-row sb-fit-row'>
-            <label><input type='radio' name='sb-fit' value='contain' ${fit === 'contain' ? 'checked' : ''}> Contain</label>
-            <label><input type='radio' name='sb-fit' value='cover' ${fit === 'cover' ? 'checked' : ''}> Cover</label>
-            <label><input type='radio' name='sb-fit' value='stretch' ${fit === 'stretch' ? 'checked' : ''}> Stretch</label>
+            <label><input type='radio' name='sb-presentation' value='contain' ${presentation === 'contain' ? 'checked' : ''}> Contain</label>
+            <label><input type='radio' name='sb-presentation' value='cover' ${presentation === 'cover' ? 'checked' : ''}> Cover</label>
+            <label><input type='radio' name='sb-presentation' value='masonry' ${presentation === 'masonry' ? 'checked' : ''}> Masonry</label>
+          </div>
+        </div>
+
+        <div class='sb-section'>
+          <h4><i class="fa-solid fa-list-ol"></i> Image Limit</h4>
+          <div class='sb-row'>
+            <span class='sb-label'>Show <span class='sb-val' id='sb-limit-val'>${limitLabel}</span></span>
+            <input type='range' id='sb-limit' min='0' max='5000' value='${imgLimit}' step='500'>
+          </div>
+        </div>
+
+        <div class='sb-section'>
+          <h4><i class="fa-solid fa-circle-info"></i> Image Viewer</h4>
+          <div class='sb-row'>
+            <label><input type='checkbox' id='sb-viewer-panel-hidden' ${this.app.viewerPanelHidden ? 'checked' : ''}> Start with info panel hidden</label>
           </div>
         </div>
 
@@ -234,29 +254,50 @@ class Navbar {
       })
     })
 
-    // Zoom
+    // Zoom — label updates live, CSS recalc debounced
     sidebar.querySelector('#sb-zoom').addEventListener('input', async (e) => {
       const val = parseInt(e.target.value)
       sidebar.querySelector('#sb-zoom-val').textContent = val + '%'
-      await this.app.api.setSetting('zoom', val)
       this.app.zoom = val
-      this.app.zoomer.resized()
+      this.app.api.setSetting('zoom', val)
+      this._debouncedApplyStyle()
     })
 
-    // Aspect ratio
-    sidebar.querySelector('#sb-aspect').addEventListener('input', async (e) => {
+    // Aspect ratio — label updates live, CSS recalc debounced
+    sidebar.querySelector('#sb-aspect')?.addEventListener('input', async (e) => {
       const val = parseInt(e.target.value)
       sidebar.querySelector('#sb-aspect-val').textContent = val + '%'
-      await this.app.api.setSetting('aspect_ratio', val)
-      await this.app.init_style()
+      this.app.style.aspect_ratio = val
+      this.app.api.setSetting('aspect_ratio', val)
+      this._debouncedApplyStyle()
     })
 
-    // Fit mode
-    sidebar.querySelectorAll('[name=sb-fit]').forEach(el => {
+    // Grid presentation (Contain / Cover / Masonry)
+    sidebar.querySelectorAll('[name=sb-presentation]').forEach(el => {
       el.addEventListener('change', async () => {
-        await this.app.api.setSetting('fit', el.value)
-        await this.app.init_style()
+        const presentation = el.value
+        this.app.applyGridPresentation(presentation)
+        await this.app.api.setSetting('image_grid_mode', this.app.grid_mode)
+        if (presentation !== 'masonry') await this.app.api.setSetting('fit', presentation)
+        sidebar.querySelector('.sb-aspect-row')?.classList.toggle('hidden', presentation === 'masonry')
       })
+    })
+
+    // Image limit
+    sidebar.querySelector('#sb-limit')?.addEventListener('input', async (e) => {
+      const val = parseInt(e.target.value)
+      sidebar.querySelector('#sb-limit-val').textContent = val === 0 ? 'No limit' : val
+      await this.app.api.setSetting('image_limit', val)
+      this.app.image_limit = val
+    })
+    sidebar.querySelector('#sb-limit')?.addEventListener('change', async () => {
+      await this.app.draw()
+    })
+
+    // Image viewer panel
+    sidebar.querySelector('#sb-viewer-panel-hidden')?.addEventListener('change', async (e) => {
+      this.app.viewerPanelHidden = e.target.checked
+      await this.app.api.setSetting('viewer_panel_hidden', e.target.checked)
     })
 
     // Slideshow interval
@@ -264,7 +305,7 @@ class Navbar {
       const val = parseFloat(e.target.value) * 1000
       sidebar.querySelector('#sb-ss-val').textContent = e.target.value + 's'
       await this.app.api.setSetting('slideshow_interval', val)
-      await this.app.init_style()
+      this.app.style.slideshow_interval = val
     })
 
     // Re-index
@@ -357,6 +398,11 @@ class Navbar {
             </div>
             <div class='fp-list'>${rows}</div>
             <div class='fp-actions'>
+              <label style='display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:6px 0'>
+                <input type='checkbox' id='fp-recursive' checked>
+                <i class="fa-solid fa-folder-tree" style='opacity:0.7;font-size:11px'></i>
+                <span>Include subfolders</span>
+              </label>
               <button class='fp-btn fp-connect'><i class="fa-solid fa-folder-plus"></i> Connect a folder</button>
             </div>
           </div>
@@ -370,13 +416,14 @@ class Navbar {
           const connectBtn = popper.querySelector('.fp-connect')
           if (connectBtn) {
             connectBtn.addEventListener('click', async () => {
+              const recursiveCheck = popper.querySelector('#fp-recursive')
+              const recursive = recursiveCheck ? recursiveCheck.checked : true
               const paths = await this.app.api.select()
               if (paths && paths.length > 0) {
                 for (const p of paths) {
-                  await this.app.api.addFolder(p)
+                  await this.app.api.addFolder(p, { recursive })
                 }
                 instance.hide()
-                // Trigger sync for new folders
                 location.href = "/?synchronize=default"
               }
             })
@@ -526,5 +573,13 @@ class Navbar {
   // Called from app.js bootstrap
   async view_mode() {
     this.folder_panel()
+  }
+
+  _debounce(fn, delay) {
+    let timer = null
+    return (...args) => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => { timer = null; fn(...args) }, delay)
+    }
   }
 }

@@ -27,6 +27,11 @@ class App {
       });
     }
     this.domparser = new DOMParser()
+    this.image_limit = 0
+    this.grid_mode = 'flex'
+    this.viewerPanelHidden = false
+    this.showBookmarkBar = true
+    this._scanning = false
     hotkeys("ctrl+t,cmd+t,ctrl+n,cmd+n", (e) => {
       window.open("/", "_blank", "popup")
     })
@@ -107,8 +112,6 @@ class App {
   async init () {
     console.log("INIT", VERSION)
 
-    // Nav is position:fixed — the container scrolls from the top of the viewport
-    // behind the nav. Pad the container's content so cards start below the nav.
     const nav = document.querySelector('nav')
     const container = document.querySelector('.container')
     if (nav && container) {
@@ -124,6 +127,7 @@ class App {
     this.init_rpc()
     this.init_minimize()
     await this.bootstrap()
+    await this.initBookmarkBar()
     document.querySelector(".search-box .search").focus()
   }
 
@@ -214,14 +218,23 @@ class App {
       this.zoom = parseInt(res.val)
     }
 
-    // Auto-hide nav
     let autoHideRes = await this.api.getSetting('autohide_nav')
     this.autoHideNav = autoHideRes.val === 'true' || autoHideRes.val === true
     this.applyAutoHideNav()
 
-    // Confirm on delete
     let confirmRes = await this.api.getSetting('confirm_delete')
     this.confirmDelete = confirmRes.val != null ? (confirmRes.val === 'true' || confirmRes.val === true) : true
+
+    let limitRes = await this.api.getSetting('image_limit')
+    this.image_limit = limitRes.val != null ? parseInt(limitRes.val) : 0
+
+    let bookmarkBarRes = await this.api.getSetting('show_bookmark_bar')
+    this.showBookmarkBar = bookmarkBarRes.val === 'false' || bookmarkBarRes.val === false ? false : true
+    const bookmarkToggle = document.querySelector('#show-bookmark-bar')
+    if (bookmarkToggle) bookmarkToggle.checked = this.showBookmarkBar
+
+    let viewerPanelRes = await this.api.getSetting('viewer_panel_hidden')
+    this.viewerPanelHidden = viewerPanelRes.val === 'true' || viewerPanelRes.val === true
   }
 
   // Custom themed confirm dialog — returns a Promise<boolean>
@@ -262,7 +275,6 @@ class App {
     const nav = document.querySelector('nav')
     if (!nav) return
 
-    // Clean up previous listeners
     if (this._navMouseLeave) {
       nav.removeEventListener('mouseleave', this._navMouseLeave)
       this._navMouseLeave = null
@@ -276,19 +288,17 @@ class App {
       this._navHideTimer = null
     }
 
-    // Remove drag zone if exists
     const existingDragZone = document.getElementById('autohide-drag-zone')
     if (existingDragZone) existingDragZone.remove()
 
     if (this.autoHideNav) {
       nav.classList.add('autohide')
+      if (this.bookmarkBar) this.bookmarkBar.classList.add('autohide')
 
-      // Create a thin drag zone at the very top for window dragging
       const dragZone = document.createElement('div')
       dragZone.id = 'autohide-drag-zone'
       document.body.appendChild(dragZone)
 
-      // Show nav when mouse moves to top 8px of window
       this._navTriggerMove = (e) => {
         if (e.clientY <= 8) {
           if (this._navHideTimer) {
@@ -296,21 +306,21 @@ class App {
             this._navHideTimer = null
           }
           nav.classList.add('force-show')
+          if (this.bookmarkBar) this.bookmarkBar.classList.add('force-show')
         }
       }
       document.addEventListener('mousemove', this._navTriggerMove)
 
-      // Hide nav with a delay when mouse leaves
       this._navMouseLeave = () => {
         if (this._navHideTimer) clearTimeout(this._navHideTimer)
         this._navHideTimer = setTimeout(() => {
           nav.classList.remove('force-show')
+          if (this.bookmarkBar) this.bookmarkBar.classList.remove('force-show')
           this._navHideTimer = null
         }, 600)
       }
       nav.addEventListener('mouseleave', this._navMouseLeave)
 
-      // Cancel hide if mouse re-enters nav
       nav.addEventListener('mouseenter', () => {
         if (this._navHideTimer) {
           clearTimeout(this._navHideTimer)
@@ -318,11 +328,29 @@ class App {
         }
       })
 
+      if (this.bookmarkBar) {
+        this.bookmarkBar.addEventListener('mouseenter', () => {
+          if (this._navHideTimer) { clearTimeout(this._navHideTimer); this._navHideTimer = null }
+          this.bookmarkBar.classList.add('force-show')
+        })
+        this.bookmarkBar.addEventListener('mouseleave', () => {
+          if (this._navHideTimer) clearTimeout(this._navHideTimer)
+          this._navHideTimer = setTimeout(() => {
+            this.bookmarkBar.classList.remove('force-show')
+            this._navHideTimer = null
+          }, 600)
+        })
+      }
+
       const container = document.querySelector('.container')
       if (container) container.style.paddingTop = '6px'
     } else {
       nav.classList.remove('autohide')
       nav.classList.remove('force-show')
+      if (this.bookmarkBar) {
+        this.bookmarkBar.classList.remove('autohide')
+        this.bookmarkBar.classList.remove('force-show')
+      }
 
       const container = document.querySelector('.container')
       if (container) container.style.paddingTop = nav.offsetHeight + 'px'
@@ -343,6 +371,7 @@ class App {
   async init_style () {
     let aspect_ratio = await this.api.getSetting('aspect_ratio')
     let fit = await this.api.getSetting('fit')
+    let grid_mode = await this.api.getSetting('image_grid_mode')
     let expanded_width = await this.api.getSetting('expanded_width')
     let slideshow_interval = await this.api.getSetting('slideshow_interval')
     let recycle = await this.api.getSetting('recycle')
@@ -354,11 +383,40 @@ class App {
       slideshow_interval: (slideshow_interval.val ? slideshow_interval.val : 3000),
       recycle: (recycle.val != null ? (recycle.val === 'true' || recycle.val === true) : true)
     }
-    document.body.style.setProperty("--card-aspect-ratio", `${this.style.aspect_ratio}`)
-    document.body.style.setProperty("--card-fit", `${this.style.fit}`)
+    this.grid_mode = (grid_mode.val ? grid_mode.val : 'flex')
+    this.applyGridMode()
+    this.applyCardStyle()
     document.body.style.setProperty("--expanded-width", `${this.style.expanded_width}%`)
     document.body.style.setProperty("--image-width", `${this.style.image_width}%`)
     this.api.style(this.style)
+  }
+
+  applyCardStyle() {
+    const minW = Math.max(120, Math.round(200 * (this.zoom || 100) / 100))
+    document.documentElement.style.setProperty('--card-width', minW + 'px')
+    document.documentElement.style.setProperty('--card-aspect-ratio', String(this.style.aspect_ratio || 100))
+    document.documentElement.style.setProperty('--card-fit', this.style.fit || 'contain')
+  }
+
+  applyGridMode() {
+    const mode = this.grid_mode || 'flex'
+    const container = document.querySelector('.container')
+    if (container) container.setAttribute('data-grid', mode)
+  }
+
+  getGridPresentation() {
+    return this.grid_mode === 'masonry' ? 'masonry' : (this.style.fit || 'contain')
+  }
+
+  applyGridPresentation(presentation) {
+    if (presentation === 'masonry') {
+      this.grid_mode = 'masonry'
+    } else {
+      this.grid_mode = 'flex'
+      this.style.fit = presentation
+    }
+    this.applyGridMode()
+    this.applyCardStyle()
   }
 
   async subscribe() {
@@ -440,7 +498,6 @@ class App {
     let items = results
     document.querySelector(".content-info").innerHTML = `<i class="fa-solid fa-check"></i> ${count}`
 
-    // Map server results to card format — build tokens array for card.js compatibility
     items = items.map(item => {
       let tokens = []
       if (item.prompt && typeof item.prompt === 'string') {
@@ -455,21 +512,35 @@ class App {
     })
 
     let data = items.map((item) => {
-      return `<div class='card' data-root="${item.root_path}" data-src="${item.file_path}" data-fingerprint="${item.fingerprint}">${card(item, this.stripPunctuation)}</div>`
+      const ar = item.width && item.height ? (item.width / item.height) : null
+      const arStyle = ar ? `--card-ar:${ar};` : ''
+      return `<div class='card' data-root="${item.root_path}" data-src="${item.file_path}" data-fingerprint="${item.fingerprint}" style='${arStyle}'>${card(item, this.stripPunctuation)}</div>`
     })
 
-    // Render all cards directly — images use loading="lazy" for performance
-    // Clusterize is not grid-aware and causes layout issues with multi-column grids
     document.querySelector(".content").innerHTML = data.join("")
 
     this.selection.init()
     this.zoomer.resized()
+    this._updateEndMarker()
+  }
+
+  _updateEndMarker() {
+    const marker = document.querySelector('.end-marker')
+    if (!marker) return
+    if (this.images && this.images.length > 0 && !this._scanning) {
+      marker.style.display = ''
+      const icon = marker.querySelector('.fa-chess-board')
+      if (icon) icon.classList.remove('fa-bounce')
+    } else if ((!this.images || this.images.length === 0) && !this._scanning) {
+      marker.style.display = 'none'
+    } else {
+      marker.style.display = ''
+    }
   }
 
   async draw () {
     document.querySelector(".search").value = (this.query && this.query.length ? this.query : "")
 
-    // Check if current query is favorited
     if (this.query) {
       let favorites = await this.api.getFavorites()
       let favorited = favorites.find(f => f.query === this.query)
@@ -485,25 +556,29 @@ class App {
       document.querySelector("nav #favorite i").className = "fa-regular fa-star"
     }
 
-    // Search via server API — load all results
     const result = await this.api.searchImages(this.query || '', {
       sort: this.navbar.sorter.column,
       direction: this.navbar.sorter.direction,
       offset: 0,
-      limit: 50000
+      limit: this.image_limit || 50000
     })
 
+    this.images = result.results
     if (result.results.length > 0) {
       await this.fill(result)
       document.querySelector("#sync").classList.remove("disabled")
       document.querySelector("#sync").disabled = false
       document.querySelector("#sync i").classList.remove("fa-spin")
     } else {
+      this.images = []
       await this.fill(result)
       if (!this.query) {
-        document.querySelector(".empty-container").innerHTML = `<div style='opacity:0.5'><i class="fa-solid fa-image" style='font-size:4rem;margin-bottom:20px'></i><h2 style='font-size:1.5rem;font-weight:normal;margin:0 0 10px'>No images loaded</h2><p style='margin:0;font-size:0.9rem'>Click the <i class="fa-solid fa-folder-open"></i> folder icon to connect an image folder</p></div>`
+        document.querySelector(".content").innerHTML = `<div class='video-empty'><i class="fa-solid fa-image"></i><h2>No images loaded</h2><p>Click the <i class="fa-solid fa-folder-open"></i> folder icon to connect an image folder</p></div>`
+        this._updateEndMarker()
       }
     }
+
+    await this.refreshBookmarkBar()
   }
 
   async search (query, options) {
@@ -517,6 +592,171 @@ class App {
     } else {
       location.href = "/?" + params.toString()
     }
+  }
+
+  // =============================================
+  // Bookmark Bar
+  // =============================================
+
+  async initBookmarkBar() {
+    this.bookmarkBar = document.querySelector('#bookmark-bar')
+    if (!this.bookmarkBar) return
+
+    document.querySelector('#show-bookmark-bar')?.addEventListener('change', async (e) => {
+      await this.api.setSetting('show_bookmark_bar', e.target.checked)
+      this.showBookmarkBar = e.target.checked
+      if (e.target.checked) { await this.refreshBookmarkBar() }
+      else { this.bookmarkBar.classList.add('hidden'); this.closeBookmarkMenu() }
+    })
+
+    await this.refreshBookmarkBar()
+  }
+
+  async refreshBookmarkBar() {
+    if (!this.bookmarkBar) return
+
+    const nav = document.querySelector('nav')
+    if (nav) {
+      const navHeight = nav.offsetHeight
+      this.bookmarkBar.style.top = `${navHeight}px`
+    }
+
+    if (!this.showBookmarkBar) {
+      this.bookmarkBar.classList.add('hidden')
+      this.closeBookmarkMenu()
+      return
+    }
+
+    try {
+      const folders = await this.api.getImageFolderBookmarks()
+
+      if (!folders || folders.length === 0) {
+        this.bookmarkBar.classList.add('hidden')
+        this.closeBookmarkMenu()
+        return
+      }
+
+      this.bookmarkBar.classList.remove('hidden')
+
+      const chips = folders.map((folder, index) => {
+        const rootQuery = `root_path:${this.quoteQueryValue(folder.path)}`
+        const isActive = this.query && this.query.includes(rootQuery)
+        const name = this.escapeHTML(folder.name || folder.path)
+        const path = this.escapeHTML(folder.path)
+        const subCount = Array.isArray(folder.subfolders) ? folder.subfolders.length : 0
+        const menuHint = subCount > 0 ? 'Right-click for subfolders' : 'No indexed subfolders'
+        return `<div class='bookmark-chip bookmark-folder-chip ${isActive ? 'active' : ''}' data-folder-index='${index}' title='${path} (${folder.count || 0} images). ${menuHint}'>
+          <i class="fa-solid fa-folder"></i>
+          <span>${name}</span>
+          <span class='count'>(${folder.count || 0})</span>
+          ${subCount > 0 ? `<i class="fa-solid fa-caret-down bookmark-menu-caret"></i>` : ''}
+        </div>`
+      }).join('')
+
+      const allActive = !this.query || (!this.query.includes('subfolder:') && !this.query.includes('root_path:'))
+      const allChip = `<div class='bookmark-chip ${allActive ? 'active' : ''}' data-subfolder='__all__' title='Show all images'>
+        <i class="fa-solid fa-image"></i>
+        <span>All Images</span>
+      </div>`
+
+      this.bookmarkBar.innerHTML = allChip + chips
+      this._bookmarkFolders = folders
+
+      this.bookmarkBar.querySelectorAll('.bookmark-chip').forEach(chip => {
+        chip.addEventListener('click', (e) => {
+          e.preventDefault()
+          const subfolder = chip.dataset.subfolder
+
+          if (subfolder === '__all__') {
+            this.query = ''
+            const searchInput = document.querySelector('.search')
+            if (searchInput) searchInput.value = ''
+          } else {
+            const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
+            if (!folder) return
+            this.query = `root_path:${this.quoteQueryValue(folder.path)}`
+            const searchInput = document.querySelector('.search')
+            if (searchInput) searchInput.value = this.query
+          }
+
+          this.closeBookmarkMenu()
+          this.draw()
+        })
+        chip.addEventListener('contextmenu', (e) => {
+          if (!chip.classList.contains('bookmark-folder-chip')) return
+          e.preventDefault()
+          const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
+          if (folder) this.openBookmarkMenu(folder, chip)
+        })
+      })
+    } catch (e) {
+      console.error('Error loading bookmarks:', e)
+      this.bookmarkBar.classList.add('hidden')
+    }
+  }
+
+  openBookmarkMenu(folder, chip) {
+    this.closeBookmarkMenu()
+    const subfolders = Array.isArray(folder.subfolders) ? folder.subfolders : []
+    if (subfolders.length === 0) return
+
+    const rect = chip.getBoundingClientRect()
+    const menu = document.createElement('div')
+    menu.className = 'bookmark-folder-menu'
+    menu.style.left = `${Math.max(8, rect.left)}px`
+    menu.style.top = `${rect.bottom + 6}px`
+    menu.innerHTML = subfolders.map((sf) => {
+      const leaf = this.escapeHTML(sf.subfolder.split(/[/\\]/).pop() || sf.subfolder)
+      const full = this.escapeHTML(sf.subfolder)
+      return `<button class='bookmark-folder-menu-item' data-subfolder='${full}' title='${full}'>
+        <i class="fa-regular fa-folder"></i>
+        <span>${leaf}</span>
+        <span class='count'>${sf.count}</span>
+      </button>`
+    }).join('')
+
+    menu.querySelectorAll('.bookmark-folder-menu-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const subfolder = item.dataset.subfolder
+        this.query = `root_path:${this.quoteQueryValue(folder.path)} subfolder:${this.quoteQueryValue(subfolder)}`
+        const searchInput = document.querySelector('.search')
+        if (searchInput) searchInput.value = this.query
+        this.closeBookmarkMenu()
+        this.draw()
+      })
+    })
+
+    document.body.appendChild(menu)
+    this._bookmarkMenu = menu
+    this._bookmarkMenuCloser = (e) => {
+      if (this._bookmarkMenu && !this._bookmarkMenu.contains(e.target)) this.closeBookmarkMenu()
+    }
+    setTimeout(() => document.addEventListener('mousedown', this._bookmarkMenuCloser), 0)
+  }
+
+  closeBookmarkMenu() {
+    if (this._bookmarkMenuCloser) {
+      document.removeEventListener('mousedown', this._bookmarkMenuCloser)
+      this._bookmarkMenuCloser = null
+    }
+    if (this._bookmarkMenu) {
+      this._bookmarkMenu.remove()
+      this._bookmarkMenu = null
+    }
+  }
+
+  // --- Utilities ---
+
+  quoteQueryValue(val) {
+    const str = typeof val === 'string' ? val : String(val)
+    if (/\s/.test(str)) return `"${str}"`
+    return str
+  }
+
+  escapeHTML(str) {
+    const el = document.createElement('div')
+    el.textContent = str
+    return el.innerHTML
   }
 
   stripPunctuation (str) {

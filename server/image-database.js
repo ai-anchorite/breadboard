@@ -114,6 +114,10 @@ class ImageDatabase {
       CREATE INDEX IF NOT EXISTS idx_trash_deleted ON trash(deleted_at);
     `);
 
+    // Migrate: add columns if they don't exist (for existing databases)
+    try { this.db.exec('ALTER TABLE folders ADD COLUMN recursive INTEGER NOT NULL DEFAULT 1'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE images ADD COLUMN subfolder TEXT'); } catch (e) { /* already exists */ }
+
     // Prepare frequently-used statements
     this._stmts = {
       getByFingerprint: this.db.prepare('SELECT * FROM images WHERE fingerprint = ?'),
@@ -628,6 +632,8 @@ class ImageDatabase {
         parsed.push({ type: 'field', field: 'agent', op: 'LIKE', value: token.slice(6) });
       } else if (token.startsWith('file_path:')) {
         parsed.push({ type: 'field', field: 'file_path', op: 'LIKE', value: token.slice(10) });
+      } else if (token.startsWith('root_path:')) {
+        parsed.push({ type: 'field', field: 'root_path', op: 'LIKE', value: token.slice(10) });
       } else if (token.startsWith('subfolder:')) {
         parsed.push({ type: 'field', field: 'subfolder', op: 'LIKE', value: token.slice(10) });
       } else if (token.startsWith('loras:')) {
@@ -732,8 +738,8 @@ class ImageDatabase {
 
   // --- Folders ---
 
-  addFolder(folderPath) {
-    this.db.prepare('INSERT OR IGNORE INTO folders (path, added_at) VALUES (?, ?)').run(folderPath, Date.now());
+  addFolder(folderPath, recursive = true) {
+    this.db.prepare('INSERT OR IGNORE INTO folders (path, recursive, added_at) VALUES (?, ?, ?)').run(folderPath, recursive ? 1 : 0, Date.now());
   }
 
   removeFolder(folderPath) {
@@ -744,6 +750,42 @@ class ImageDatabase {
 
   getFolders() {
     return this.db.prepare('SELECT * FROM folders ORDER BY added_at').all();
+  }
+
+  getFolderBookmarks() {
+    const folders = this.getFolders();
+    const counts = this.db.prepare(`
+      SELECT root_path, COUNT(*) as count
+      FROM images
+      WHERE root_path IS NOT NULL AND root_path != ''
+      GROUP BY root_path
+    `).all();
+    const subfolders = this.db.prepare(`
+      SELECT root_path, subfolder, COUNT(*) as count
+      FROM images
+      WHERE root_path IS NOT NULL AND root_path != ''
+        AND subfolder IS NOT NULL AND subfolder != ''
+      GROUP BY root_path, subfolder
+      ORDER BY root_path ASC, subfolder ASC
+    `).all();
+
+    const countByRoot = new Map(counts.map((row) => [row.root_path, row.count]));
+    const subfoldersByRoot = new Map();
+    for (const row of subfolders) {
+      if (!subfoldersByRoot.has(row.root_path)) subfoldersByRoot.set(row.root_path, []);
+      subfoldersByRoot.get(row.root_path).push({
+        subfolder: row.subfolder,
+        count: row.count,
+      });
+    }
+
+    return folders.map((folder) => ({
+      ...folder,
+      name: path.basename(folder.path) || folder.path,
+      recursive: folder.recursive !== 0,
+      count: countByRoot.get(folder.path) || 0,
+      subfolders: subfoldersByRoot.get(folder.path) || [],
+    }));
   }
 
   // --- Checkpoints ---

@@ -57,6 +57,10 @@
         </div>
       </div>
       <div class='nav-unit nav-actions'>
+        <label id='bookmark-bar-toggle' class='nav-checkbox-toggle' title='show or hide the folder bookmark bar'>
+          <input type='checkbox' id='show-bookmark-bar' checked>
+          <i class="fa-solid fa-bookmark"></i>
+        </label>
         <button id='folder-option' title="manage folders"><i class="fa-solid fa-folder-open"></i></button>
         <button id='live-option' title="turn live update on or off"><i class="fa-solid fa-power-off fa-spin"></i></button>
         <% if (agent === "electron") { %>
@@ -68,12 +72,12 @@
         <button id='new-window' title='open a new window'><i class="fa-solid fa-plus"></i></button>
       </div>
     </nav>
+    <div id='bookmark-bar' class='bookmark-bar hidden'></div>
     <div class='loading hidden'>
       <i class="fa-solid fa-circle-notch fa-bounce"></i>
       <br><br>
       <span>loading</span>
     </div>
-    <div class='empty-container'></div>
     <div class='container'>
       <div class='content'></div>
       <div class='end-marker'>

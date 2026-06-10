@@ -792,9 +792,9 @@ class BreadboardServer {
 
     app.post("/api/folders", express.json(), (req, res) => {
       if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
-      const { path: folderPath } = req.body;
+      const { path: folderPath, recursive } = req.body;
       if (!folderPath) return res.status(400).json({ error: 'path required' });
-      this.config.imageDb.addFolder(folderPath);
+      this.config.imageDb.addFolder(folderPath, recursive !== false);
       res.json({ success: true });
     })
 
@@ -804,6 +804,12 @@ class BreadboardServer {
       if (!folderPath) return res.status(400).json({ error: 'path required' });
       this.config.imageDb.removeFolder(folderPath);
       res.json({ success: true });
+    })
+
+    app.get("/api/folders/bookmarks", (req, res) => {
+      if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
+      const folders = this.config.imageDb.getFolderBookmarks();
+      res.json(folders);
     })
 
     // --- Settings API ---

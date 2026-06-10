@@ -87,8 +87,9 @@ class API {
 
   // Folders
   getFolders() { return this._get('/api/folders') }
-  addFolder(path) { return this._post('/api/folders', { path }) }
+  addFolder(path, options = {}) { return this._post('/api/folders', { path, recursive: options.recursive !== false }) }
   removeFolder(path) { return this._delete('/api/folders', { path }) }
+  getImageFolderBookmarks() { return this._get('/api/folders/bookmarks') }
 
   // Settings
   getSetting(key) { return this._get(`/api/settings/${key}`) }
