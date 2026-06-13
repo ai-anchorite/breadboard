@@ -1,4 +1,4 @@
-const {app, shell, BrowserWindow, ipcMain, dialog, clipboard } = require('electron')
+const {app, shell, BrowserWindow, ipcMain, dialog, clipboard, nativeImage } = require('electron')
 const path = require("path")
 const BreadboardServer = require('./server')
 const packagejson = require('./package.json')
@@ -195,9 +195,10 @@ app.whenReady().then(async () => {
   // Request handlers for preload.js
   ipcMain.handle("ondragstart", (event, filePaths) => {
     if (event && event.sender) {
+      const icon = nativeImage.createFromPath(filePaths[0]).resize({ width: 128 })
       event.sender.startDrag({
         files: filePaths,
-        icon: filePaths[0]
+        icon
       })
     }
   })
