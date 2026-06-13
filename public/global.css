@@ -2029,6 +2029,8 @@ body.default .sb-section { border-bottom-color: #e0e0e0; }
   min-width: 100px;
 }
 .sb-label { font-size: 12px; min-width: 100px; }
+.sb-frame-format { flex-wrap: nowrap !important; gap: 4px !important; }
+.sb-frame-format label { font-size: 12px; cursor: pointer; white-space: nowrap; }
 .sb-val { color: #888; }
 .sb-btn {
   padding: 6px 12px;

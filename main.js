@@ -155,9 +155,17 @@ app.whenReady().then(async () => {
           return res.filePaths
         }
       })
-      breadboard.ipc[session].handle('open', async (_session, file_path) => {
-        // only one
-        await shell.showItemInFolder(file_path)
+      breadboard.ipc[session].handle('open', async (_session, _path) => {
+        try {
+          const stat = fs.statSync(_path)
+          if (stat.isDirectory()) {
+            shell.openPath(_path)
+          } else {
+            shell.showItemInFolder(_path)
+          }
+        } catch (e) {
+          shell.showItemInFolder(_path)
+        }
       })
       breadboard.ipc[session].handle('pinned', (_session) => {
         let win = wins[_session]

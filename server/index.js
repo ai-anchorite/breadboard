@@ -437,7 +437,7 @@ class BreadboardServer {
       app.use(this.basicauth.auth.bind(this.basicauth))
     }
     
-    app.use(express.json());
+    app.use(express.json({ limit: '50mb' }));
     app.set('view engine', 'ejs');
     app.set('views', path.resolve(__dirname, "../views"))
     
@@ -1015,6 +1015,24 @@ class BreadboardServer {
       if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
       this.config.videoDb.setSetting(req.params.key, req.body.val);
       res.json({ success: true });
+    })
+
+    app.post("/api/save-frame", express.json({ limit: '50mb' }), (req, res) => {
+      if (!this.config.videoDb) return res.status(503).json({ error: 'Video database not initialized' });
+      const saveDir = this.config.videoDb.getSetting('frame_save_dir');
+      if (!saveDir) return res.status(400).json({ error: 'No frame save directory configured' });
+      const { dataUrl, filename } = req.body;
+      if (!dataUrl) return res.status(400).json({ error: 'dataUrl required' });
+      try {
+        const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+        const buf = Buffer.from(base64, 'base64');
+        const name = filename || `frame-${Date.now()}.png`;
+        const filePath = path.join(saveDir, name);
+        fs.writeFileSync(filePath, buf);
+        res.json({ saved: true, filename: name, path: filePath });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
     })
 
     app.get("/api/status", (req, res) => {

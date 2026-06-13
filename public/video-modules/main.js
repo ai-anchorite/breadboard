@@ -16,6 +16,8 @@ class VideoApp {
     this.video_limit = 0
     this.volume = 50
     this.viewerPanelHidden = false
+    this._frameSaveDir = null
+    this._frameFormat = 'png'
     this._zoom = 1
     this._panX = 0
     this._panY = 0
@@ -83,6 +85,10 @@ class VideoApp {
     this.style.fit = fitRes.val || 'cover'
     this.volume = volumeRes.val != null ? parseInt(volumeRes.val) : 50
     this.viewerPanelHidden = viewerPanelRes.val === 'true' || viewerPanelRes.val === true
+    const frameSaveRes = await this.api.getVideoSetting('frame_save_dir')
+    this._frameSaveDir = frameSaveRes.val || null
+    const frameFormatRes = await this.api.getVideoSetting('frame_save_format')
+    this._frameFormat = frameFormatRes.val || 'png'
     const bookmarkBarVal = bookmarkBarRes.val != null ? bookmarkBarRes.val : legacySubfolderBarRes.val
     this.showBookmarkBar = bookmarkBarVal === 'false' || bookmarkBarVal === false ? false : true
     const bookmarkToggle = document.querySelector('#show-bookmark-bar')
@@ -1095,11 +1101,48 @@ class VideoApp {
     const canvas = document.createElement('canvas')
     canvas.width = v.videoWidth; canvas.height = v.videoHeight
     canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height)
-    const a = document.createElement('a')
+    const fmt = this._frameFormat || 'png'
+    const mime = fmt === 'jpeg' ? 'image/jpeg' : fmt === 'webp' ? 'image/webp' : 'image/png'
+    const ext = fmt === 'jpeg' ? 'jpg' : fmt
+    const dataUrl = canvas.toDataURL(mime)
     const base = (data?.filename || data?.fingerprint || 'video-frame').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_')
-    a.href = canvas.toDataURL('image/png')
-    a.download = `${base}-${this.formatClock(v.currentTime).replace(/:/g, '-')}.png`
-    a.click()
+    const ts = this._formatTimestamp(v.currentTime)
+    const filename = `${base}-${ts}.${ext}`
+
+    const saveDir = this._frameSaveDir
+    if (saveDir) {
+      fetch('/api/save-frame', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl, filename })
+      }).then(r => r.json()).then(result => {
+        if (result.saved) this._flashCaptureBtn()
+      }).catch(() => {})
+    } else {
+      const a = document.createElement('a')
+      a.href = dataUrl
+      a.download = filename
+      a.click()
+    }
+  }
+
+  _formatTimestamp(seconds) {
+    if (!seconds || !isFinite(seconds) || seconds < 0) seconds = 0
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    const s = Math.floor(seconds % 60)
+    const ms = Math.floor((seconds % 1) * 1000)
+    if (h > 0) return `${h}-${String(m).padStart(2, '0')}-${String(s).padStart(2, '0')}-${String(ms).padStart(3, '0')}`
+    return `${m}-${String(s).padStart(2, '0')}-${String(ms).padStart(3, '0')}`
+  }
+
+  _flashCaptureBtn() {
+    const btn = document.querySelector('.bb-tb-capture')
+    if (!btn) return
+    btn.style.color = '#4c5'
+    btn.style.transition = 'color 0.2s ease'
+    clearTimeout(this._captureFlashTimer)
+    this._captureFlashTimer = setTimeout(() => { btn.style.color = '' }, 1200)
   }
 
   // --- Panel ---
@@ -1222,6 +1265,7 @@ class VideoApp {
         <div class='sb-section'><h4><i class="fa-solid fa-border-all"></i> Grid Layout</h4><div class='sb-row'><span class='sb-label'>Scale <span class='sb-val' id='sb-zoom-val'>${zoom}%</span></span><input type='range' id='sb-zoom' min='20' max='600' value='${zoom}' step='1'></div><div class='sb-row sb-aspect-row ${presentation === 'masonry' ? 'hidden' : ''}'><span class='sb-label'>Aspect <span class='sb-val' id='sb-aspect-val'>${aspect}%</span></span><input type='range' id='sb-aspect' min='40' max='250' value='${aspect}' step='1'></div><div class='sb-row sb-fit-row'><label><input type='radio' name='sb-presentation' value='contain' ${presentation === 'contain' ? 'checked' : ''}> Contain</label><label><input type='radio' name='sb-presentation' value='cover' ${presentation === 'cover' ? 'checked' : ''}> Cover</label><label><input type='radio' name='sb-presentation' value='masonry' ${presentation === 'masonry' ? 'checked' : ''}> Masonry</label></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-list-ol"></i> Video Limit</h4><div class='sb-row'><span class='sb-label'>Show <span class='sb-val' id='sb-limit-val'>${limitLabel}</span></span><input type='range' id='sb-limit' min='0' max='5000' value='${vidLimit}' step='500'></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-circle-info"></i> Video Viewer</h4><div class='sb-row'><label><input type='checkbox' id='sb-viewer-panel-hidden' ${this.viewerPanelHidden ? 'checked' : ''}> Start with info panel hidden</label></div></div>
+        <div class='sb-section'><h4><i class="fa-solid fa-camera"></i> Frame Capture</h4><div class='sb-row sb-frame-format'><span class='sb-label'>Format</span><label><input type='radio' name='sb-frame-format' value='png' ${this._frameFormat === 'png' ? 'checked' : ''}> PNG</label><label><input type='radio' name='sb-frame-format' value='jpeg' ${this._frameFormat === 'jpeg' ? 'checked' : ''}> JPEG</label><label><input type='radio' name='sb-frame-format' value='webp' ${this._frameFormat === 'webp' ? 'checked' : ''}> WebP</label></div><div class='sb-row' style='gap:4px'>${this._frameSaveDir ? `<button class='sb-btn sb-open-dir' title='${this._frameSaveDir}' style='font-size:11px;flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'><i class="fa-regular fa-folder-open"></i> ${this._frameSaveDir.length > 32 ? '...' + this._frameSaveDir.slice(-28) : this._frameSaveDir}</button><button class='sb-btn sb-clear-dir' title='Clear save folder' style='font-size:11px;color:#e55;flex-shrink:0;padding:4px 8px'><i class="fa-solid fa-xmark"></i></button>` : `<button class='sb-btn sb-set-dir' style='font-size:11px;flex:1'><i class="fa-solid fa-folder-plus"></i> Set save folder</button>`}</div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-volume-high"></i> Playback Volume</h4><div class='sb-row'><span class='sb-label'>Volume <span class='sb-val' id='sb-vol-val'>${vol}%</span></span><input type='range' id='sb-volume' min='0' max='100' value='${vol}' step='5'></div></div>
         <div class='sb-section'><h4><i class="fa-solid fa-rotate"></i> Re-index</h4><button class='sb-btn sb-reindex'><i class="fa-solid fa-rotate"></i> Re-index from Scratch</button></div>
         <div class='sb-section'><h4><i class="fa-solid fa-trash-can"></i> Deleted Files</h4><div class='sb-row'><label><input type='checkbox' id='sb-confirm-delete' ${this.confirmDelete ? 'checked' : ''}> Ask before deleting</label></div><div class='sb-row sb-trash-info'><span class='sb-label'>Loading...</span></div><div class='sb-row sb-trash-actions' style='display:none'><button class='sb-btn sb-open-trash'><i class="fa-regular fa-folder-open"></i> Open Folder</button><button class='sb-btn sb-empty-trash' style='color:#e55'><i class="fa-solid fa-trash"></i> Empty Trash</button></div></div>
@@ -1241,6 +1285,27 @@ class VideoApp {
     sidebar.querySelector('#sb-autohide-nav')?.addEventListener('change', async (e) => { this.autoHideNav = e.target.checked; await this.api.setVideoSetting('autohide_nav', e.target.checked); this.applyAutoHideNav() })
     sidebar.querySelector('#sb-confirm-delete')?.addEventListener('change', async (e) => { this.confirmDelete = e.target.checked; await this.api.setVideoSetting('confirm_delete', e.target.checked) })
     sidebar.querySelector('#sb-viewer-panel-hidden')?.addEventListener('change', async (e) => { this.viewerPanelHidden = e.target.checked; await this.api.setVideoSetting('viewer_panel_hidden', e.target.checked) })
+    sidebar.querySelector('.sb-set-dir')?.addEventListener('click', async () => {
+      if (!window.electronAPI) return
+      const paths = await window.electronAPI.selectDirectory()
+      if (paths && paths.length) {
+        this._frameSaveDir = paths[0]
+        await this.api.setVideoSetting('frame_save_dir', this._frameSaveDir)
+        this.toggleSettings(); this.toggleSettings(true)
+      }
+    })
+    sidebar.querySelector('.sb-clear-dir')?.addEventListener('click', async () => {
+      this._frameSaveDir = null
+      await this.api.setVideoSetting('frame_save_dir', '')
+      this.toggleSettings(); this.toggleSettings(true)
+    })
+    sidebar.querySelector('.sb-open-dir')?.addEventListener('click', () => {
+      if (this._frameSaveDir) this.api.open(this._frameSaveDir)
+    })
+    sidebar.querySelectorAll('[name=sb-frame-format]').forEach(el => el.addEventListener('change', async () => {
+      this._frameFormat = el.value
+      await this.api.setVideoSetting('frame_save_format', el.value)
+    }))
     sidebar.querySelectorAll('[name=sb-minimal]').forEach(el => el.addEventListener('change', async () => { await this.api.setVideoSetting('minimal', el.value); this.minimal.val = el.value; document.body.setAttribute('data-minimal', el.value) }))
     sidebar.querySelector('#sb-zoom')?.addEventListener('input', async (e) => { const val = parseInt(e.target.value); sidebar.querySelector('#sb-zoom-val').textContent = val + '%'; await this.api.setVideoSetting('video_zoom', val); this.zoom = val; this.applyCardStyle() })
     // Aspect ratio

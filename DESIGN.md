@@ -21,63 +21,59 @@ Images and video serve different workflows and are kept as distinct views. The i
 
 ---
 
-## 2. Current State (as of April 2026)
+## 2. Current State (as of June 2026)
 
 ### What's working — Image Library ✅
 - SQLite database (`better-sqlite3`) with fingerprint-based PKs, WAL mode
-- REST API (`/api/*`) for all data operations — search, tags, folders, settings, favorites, trash
-- Full search system with hyperfilter syntax executed as SQL server-side
-- Custom fullscreen image viewer with pan/drag, zoom (mouse wheel + keyboard), slideshow, collapsible metadata/tag panel with hyperfilters
-- Simplified card grid with lazy-loaded images — tested smooth at 22k+ images
-- Card header: favorite, open in explorer, trash (soft-delete), pop-out
-- Soft-delete system — files move to `appdata/deleted_files/`, trash management in settings
-- Custom themed delete confirmation dialog with toggle to disable
-- Settings sidebar (slide-out) — theme, card display, slideshow, auto-hide nav, trash management, re-index, debug
-- Folder management dropdown panel — connect, disconnect, per-folder re-index
-- Frosted glass nav and footer with backdrop blur transparency
-- Auto-hide nav bar with hover reveal and window drag zone
-- Nav auto-hides during image viewer for unobstructed viewing
-- Tag system — user tags stored in XMP on files, survive re-index
-- Multi-select with drag-select and keyboard shortcuts
-- Bulk operations: add tags, remove tags, delete files, re-index
+- REST API (`/api/*`) for all data operations
+- Full search system with hyperfilter syntax (now includes `root_path:` filter)
+- Custom fullscreen image viewer with pan/drag, zoom, slideshow, metadata panel
+- **Masonry grid layout** (Contain / Cover / Masonry) with per-image native aspect ratios
+- Card header: favorite, open in explorer, trash, pop-out — frosted glass hover mode matching video tab
+- **Bookmark bar** with folder chips and right-click subfolder dropdown menus
+- Soft-delete system, trash management
+- Settings sidebar — theme, auto-hide nav, card header mode, grid layout, image limit, viewer panel, trash
+- Folder management dropdown — connect, disconnect, per-folder re-index with "Include subfolders" checkbox
+- **Indexing counter** (`indexing images... N`) during sync, matching video tab
+- Auto-hide nav bar with bookmark bar inheriting nav behaviour (bookmark bar is a nav child)
+- Multi-select with drag-select, bulk operations, keyboard shortcuts
 - Favorites / bookmarked searches / god filters
-- Dark/light theme
-- Live mode (real-time updates as new files appear)
-- Metadata extraction: Automatic1111, InvokeAI, ComfyUI, DiffusionBee, Imaginairy, NovelAI, Sygil, generic `.txt` sidecar
+- **Dark theme now factory default**
+- Tag system — user tags stored in XMP on files
+- Metadata extraction: A1111, InvokeAI, ComfyUI, DiffusionBee, NovelAI, etc.
+- **Image dimensions from file headers** (`image-size` v1.2.1) — authoritative over crawler metadata
 - Image formats: PNG, JPG, JPEG, WebP, GIF, BMP, TIFF
 - Fully portable (all data in `./appdata/`)
 
-### What's working — Video Library ✅ Redesigned
+### What's working — Video Library ✅
 - Separate `/videos` route with its own SQLite database, scanner, watcher
-- REST API (`/api/videos/*`) for all data operations — search, tags, folders, settings, trash
-- Custom fullscreen video viewer with pan/zoom (scroll-to-zoom-to-cursor, drag-to-pan), play/pause, left/right navigation, collapsible metadata/tag panel with hyperfilters, click-release-to-close
+- REST API (`/api/videos/*`, `/api/video-folders/*`, `/api/video-settings/*`)
+- Custom fullscreen video viewer with pan/zoom, seek bar, volume, mute, play/pause
+- **Frame capture** with configurable save directory and format (PNG/JPEG/WebP), millisecond-precision filenames
 - Video card grid with hover-to-play, click-to-lock playback (with audio)
-- Card header: favorite, open in explorer, trash (soft-delete), play-lock, pop-out — matching image tab layout
-- Soft-delete system — files move to `appdata/deleted_files/video/`, trash management in settings
-- Custom themed delete confirmation dialog with toggle to disable
-- Settings sidebar (slide-out) — theme (global), auto-hide nav, card header mode, card size zoom, contain/cover fit, re-index, delete confirmation, trash management, debug
-- Folder management dropdown panel — connect, disconnect, per-folder re-scan
-- Auto-hide nav bar with hover reveal, nav auto-hides during video viewer
-- Multi-select with drag-select and keyboard shortcuts (Ctrl+A, Delete, Escape)
-- Bulk operations: add tags, delete files
-- Search with query syntax (filename, tag, field filters, date filters, numeric comparisons)
-- Sort by created, updated, filename, width, duration
-- Bookmarked filters, liked items (tag:favorite), search bookmark button
-- Scan progress bar (Nanobar) with running file count during indexing
-- Dark/light theme (global, shared with image tab)
-- Tags and ratings in the video DB
-- Pop-out video viewer
+- Card header: favorite, open in explorer, trash, play-lock, pop-out
+- **Bookmark bar** with folder chips and right-click subfolder dropdowns
+- Soft-delete system, trash management
+- Settings sidebar — theme, auto-hide nav, card header, grid layout, video limit, viewer panel, frame capture, volume
+- Folder management dropdown — connect, disconnect, per-folder re-scan
+- Auto-hide nav bar with bookmark bar as nav child
+- Multi-select with drag-select, bulk operations
+- Search with query syntax (filename, tag, field filters, date filters, numeric)
+- Bookmarked filters, liked items, search bookmark button
+- Scan progress bar with running file count
+- **HEVC/H.265 direct playback** in MP4 (Chromium native in Electron 39)
+- Thumbnails via ffmpeg frame extraction, cached to `appdata/thumbnails/video/`
+- Video transcoding pipeline for unsupported containers (MKV, AVI, etc.)
+- Pop-out video viewer with full controls
+- Dark/light theme (global, shared)
 
 ### What needs work next
-- **Video generation metadata** — ComfyUI video nodes (AnimateDiff, Wan, HunyuanVideo) embed metadata in video files or sidecar JSON. This is the next major feature area.
-- **Metadata & search improvements** — better metadata extraction and presentation, improved search UX, bookmarking polish
-- **Grid-aware virtual scrolling** — for 50k+ image libraries (current direct DOM rendering works well to ~22k)
-- **Improved indexing progress UX** — centered overlay with file counter and progress bar (see BACKLOG)
-- **Popout video player redesign** — current prototype needs proper controls, theming, multi-monitor support (see BACKLOG)
+- **Video generation metadata** — ComfyUI video nodes (AnimateDiff, Wan, LTX)
+- **Metadata system expansion** — modern image generation tools
+- **Grid-aware virtual scrolling** — for 50k+ libraries
 
 ### Known issues
-- Update check throws `Entity expansion limit exceeded: 1159 > 1000` (non-critical, cosmetic)
-- `better-sqlite3` is a native module — requires rebuild per Electron version, handled by `electron-builder install-app-deps`
+
 
 ---
 
@@ -309,19 +305,14 @@ The image library has been migrated from IndexedDB/Dexie to SQLite (`better-sqli
 
 ### Medium priority
 
-**Update check entity expansion error**
-`fast-xml-parser` entity expansion limit needs to be raised to ~2000 in the updater config. One-line fix.
-
 **No video generation metadata**
 ComfyUI video nodes (AnimateDiff, Wan, HunyuanVideo, etc.) embed metadata in video files or sidecar JSON. This should be extracted and indexed.
 
-**Popout video player is a prototype**
-The `/video-viewer` page is a basic HTML video element in a popup window. Needs redesign with proper controls, theming, and multi-monitor support. See BACKLOG.
-
-### Low priority
+**Image metadata system**
+The 4-year-old crawler pipeline (parser.js, standard.js, diffusionbee.js) needs modernization. Modern image generators and newer metadata formats aren't covered. Dimensions should always come from file headers (done), but the full extraction pipeline needs a rewrite focused on prompt + model/architecture display.
 
 **Grid-aware virtual scrolling for 50k+ libraries**
-Current direct DOM rendering with `loading="lazy"` works well to ~22k images. For 50k+, a custom grid-aware virtualizer will be needed. Not blocking current development.
+Current direct DOM rendering with `loading="lazy"` works well to ~22k images. For 50k+, a custom grid-aware virtualizer will be needed. Not blocking.
 
 ---
 
@@ -394,27 +385,23 @@ Planned:
 - **Bulk tag operations** — apply/remove tags to entire search results, not just current selection
 - **Video tag sidecar** — write video tags to `.json` sidecar alongside the video file
 
-### 8.7 Metadata & Workflow Integration
+### 8.7 **removed**
 
-- **Copy for tool** — "Copy for A1111", "Copy for ComfyUI", "Copy for Forge" buttons
-- **Metadata comparison** — select two images, diff their metadata side by side
-- **Batch metadata edit** — change model name, sampler, etc. across a selection
-
-### 8.8 Training Dataset Tools *(future major update)*
+### 8.8 Training Dataset Tools
 
 Deferred. Will be tackled as a focused major update when the core library is stable.
 
-### 8.9 Image & Video Editing *(future)*
-
-Simple, non-destructive operations only.
+### 8.9 Image & Video Editing
 
 - Crop / resize, rotate / flip (canvas-based)
 - Video trim with ffmpeg (already available via Pinokio)
-- Frame extraction — save specific frames as images
+- inpaint/outpaint via comfyui (API)
+- enhance/upscale via comfyui (API)
+- image to video via comfyui (API)
 
 ### 8.10 Agent API & Pinokio Integration
 
-Breadboard is uniquely positioned to be the media intelligence layer for Pinokio's agent ecosystem. Pinokio 7 introduced agent-native architecture: any AI agent (Claude, Codex, Gemini, etc.) that supports `SKILL.md` can auto-discover and control Pinokio apps. Breadboard's metadata search, tag system, and file operations are exactly the capabilities agents need to organize and retrieve AI-generated media.
+Breadboard is uniquely positioned to be a media intelligence layer for Pinokio's agent ecosystem. Pinokio 7 introduced agent-native architecture: any AI agent (Claude, Codex, Gemini, etc.) that supports `SKILL.md` can auto-discover and control Pinokio apps. Breadboard's metadata search, tag system, and file operations are exactly the capabilities agents need to organize and retrieve AI-generated media.
 
 **Why this matters:**
 An agent can ask Breadboard "find every image generated with LoRA X" or "tag all images with prompt containing 'portrait' as 'portrait-dataset'" or "move all images tagged 'reject' to a trash folder" — all without human intervention. This turns Breadboard from a manual browsing tool into a programmable media library that agents can query and manipulate as part of larger workflows (training dataset curation, batch re-generation, portfolio assembly, etc.).
@@ -464,6 +451,26 @@ Phase 3 — Agent-friendly responses:
 - The SKILL.md file advertises only the permission level the user has enabled — an agent never sees capabilities it can't use
 - No file content or metadata is ever sent to external services — the API serves the local agent only
 - API access is logged to `appdata/logs/api.log` so the user can audit what agents have done
+
+### 8.11 Image Tab Parity Refactor ✅ Complete
+
+The image tab was brought up to feature parity with the polished video tab patterns:
+- **Masonry grid layout** (Contain / Cover / Masonry) with per-image native aspect ratios
+- **Bookmark bar** with folder chips and right-click subfolder dropdowns (now a nav child in both tabs)
+- **Grid layout, image limit, and viewer panel settings** in reorganized sidebar
+- **Frosted glass hover headers** matching video tab
+- **Smart end marker** and unified empty state rendering
+- **Indexing counter** (`indexing images... N`) replacing static "synchronizing..."
+- **`root_path:` search filter** in image query parser
+- **`recursive` flag** on image folders table with "Include subfolders" checkbox
+- **`GET /api/folders/bookmarks`** endpoint and `getFolderBookmarks()` DB method
+- **Dark theme now factory default** across both tabs
+- **Settings sidebar closes on outside click** (image tab, matching video)
+- **Custom themed confirm dialog** for folder disconnection (both tabs)
+- **Slider handlers debounced** (60ms) for performance on large libraries
+- **HEVC/H.265 direct playback** in MP4 (Chromium native in Electron 39)
+- **Frame capture** with configurable save directory and PNG/JPEG/WebP format
+- **Bookmark bar simplified** — moved from independent fixed element into nav child, inheriting autohide/glass/scrollbar for free
 
 ---
 
@@ -572,25 +579,11 @@ The app runs on Windows, Linux, and macOS. Every file system operation must use 
 
 ---
 
-## 11. Videoswarm Reference — What to Adopt
-
-The `videoswarm_cloned_in_for_reference/` directory contains a React/Vite Electron app with a more mature video handling implementation. We don't adopt its architecture (React vs. vanilla JS), but these specific pieces are worth porting:
-
-**`main/fingerprint.js`** — Better fingerprinting than our current implementation. Samples both head AND tail of file (64KB each), includes `createdMs` in the hash, produces a versioned fingerprint string (`v1-<size>-<created>-<hash>`). More collision-resistant for large video files.
-
-**`main/thumb-cache.js`** — Disk-backed thumbnail cache with LRU eviction, signature-based lookup, and scheduled persistence. The architecture is solid. Port the cache logic, adapt to our server structure.
-
-**`src/services/thumbService.js`** — Canvas-based thumbnail generation with a task queue, debouncing, and `waitForStableFrame` logic. This is the right approach for renderer-side thumbnail generation without ffmpeg dependency.
-
-**`main/watcher.js`** — More robust than our `video-watcher.js`. Has polling fallback when native fs events fail (EMFILE/ENOSPC), per-file change debouncing, and EventEmitter-based API. Worth adopting for both image and video watching.
-
-**`main/database.js`** — Has corruption detection, archive-on-corruption, and profile migration. Overkill for now but the corruption handling pattern is worth noting.
-
----
-
-## 12. Development Principles
+## 11. Development Principles
 
 **Don't unify what should stay separate.** Images and video serve different workflows and are intentionally separate views. Don't add complexity trying to merge them. They share folder management, tag namespace, and search syntax — that's enough.
+
+**Prefer HTML structure over JS coordination.** When two UI elements need to move together (e.g. nav and bookmark bar), nest one inside the other. Independent position:fixed elements with their own timers, listeners, and padding math create fragile coupling. The bookmark bar was simplified from 80+ lines of dedicated JS/CSS to a nav child with zero autohide code.
 
 **The database is a cache.** Never store anything in the DB that can't be reconstructed from the files. Tags go on files. Metadata goes on files. The DB is for fast querying only.
 
@@ -606,26 +599,6 @@ The `videoswarm_cloned_in_for_reference/` directory contains a React/Vite Electr
 
 ---
 
-## 13. Resolved Decisions
-
-These were open questions, now closed.
-
-**1. Video tag sidecar format** — `.json` sidecar alongside the video file. ✅
-
-**2. Video thumbnail generation** — ffmpeg/ffprobe via PATH. Pinokio ships with ffmpeg preinstalled, so it's available to all users. Use ffprobe for metadata extraction and ffmpeg for frame extraction. This is the right tool for the job and will be useful for future video editing features too. ✅
-
-**3. Folder management UX** — Separate folder lists and separate entry points for images and video. Decided:
-- The video view's "Select Folder" button in the top bar is the right pattern — keep it and apply the same pattern to images
-- Move folder connection out of Settings for images: add a "Connect Folder" button directly in the image gallery top bar (matching video UX)
-- Settings shows currently connected folders only, with disconnect buttons
-- Image folders and video folders are displayed as separate lists in Settings — a folder can be connected to both independently (important for mixed-output directories where a user wants image browsing AND video browsing from the same path)
-- Settings is for management (view + disconnect), not for initial connection ✅
-
-**4. Dataset tools** — Deferred to a future focused major update. Not in scope for current development. ✅
-
-**5. Image DB migration** — No migration of existing data needed. App is pre-release; implement SQLite from scratch. Fresh install only. ✅
-
----
 
 *Last updated: April 2026*
 *Image tab and video tab UI/UX redesigns complete. Video thumbnails implemented. Metadata & search improvements are next.*
