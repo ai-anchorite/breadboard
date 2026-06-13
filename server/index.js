@@ -237,12 +237,19 @@ class BreadboardServer {
     const videoCodec = (video.video_codec || '').toLowerCase()
     const formatName = (video.format_name || '').toLowerCase()
 
-    const isMp4Family = ['.mp4', '.m4v', '.mov'].includes(ext) || /(mp4|mov|isom|quicktime)/.test(formatName)
+    const isMp4 = ['.mp4', '.m4v'].includes(ext)
+    const isMov = ext === '.mov' || /(mov|quicktime)/.test(formatName) && !/mp4/.test(formatName)
+    const isMp4Family = isMp4 || isMov || /(mp4|isom)/.test(formatName)
     const isWebm = ext === '.webm' || /webm/.test(formatName)
     const isOgg = ext === '.ogv' || /ogg/.test(formatName)
 
-    if (isMp4Family && ['h264', 'avc1'].includes(videoCodec)) return 'direct'
+    // MP4/M4V: H.264, HEVC, AV1 all play natively in Chromium 107+
+    if (isMp4 && ['h264', 'avc1', 'hevc', 'h265', 'av1'].includes(videoCodec)) return 'direct'
+    // MOV: only H.264 direct (HEVC-in-MOV is unreliable in Chromium)
+    if (isMov && ['h264', 'avc1'].includes(videoCodec)) return 'direct'
+    // WebM: VP8, VP9, AV1 all play natively
     if (isWebm && ['vp8', 'vp9', 'av1'].includes(videoCodec)) return 'direct'
+    // Ogg: Theora plays natively
     if (isOgg && ['theora'].includes(videoCodec)) return 'direct'
 
     return 'transcode'

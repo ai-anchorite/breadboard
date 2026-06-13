@@ -57,7 +57,7 @@ var mainWindow;
 var root_url;
 var wins = {}
 var pinned = {}
-var theme = "default";
+var theme = "dark";
 const titleBarOverlay = (theme) => {
   if (is_mac) {
     return false

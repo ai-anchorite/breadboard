@@ -41,11 +41,14 @@ class VideoScanner {
     const videoCodec = (metadata.videoCodec || '').toLowerCase();
     const formatName = (metadata.formatName || '').toLowerCase();
 
-    const isMp4Family = ['.mp4', '.m4v', '.mov'].includes(ext) || /(mp4|mov|isom|quicktime)/.test(formatName);
+    const isMp4 = ['.mp4', '.m4v'].includes(ext);
+    const isMov = ext === '.mov' || /(mov|quicktime)/.test(formatName) && !/mp4/.test(formatName);
+    const isMp4Family = isMp4 || isMov || /(mp4|isom)/.test(formatName);
     const isWebm = ext === '.webm' || /webm/.test(formatName);
     const isOgg = ext === '.ogv' || /ogg/.test(formatName);
 
-    if (isMp4Family && ['h264', 'avc1'].includes(videoCodec)) return 'direct';
+    if (isMp4 && ['h264', 'avc1', 'hevc', 'h265', 'av1'].includes(videoCodec)) return 'direct';
+    if (isMov && ['h264', 'avc1'].includes(videoCodec)) return 'direct';
     if (isWebm && ['vp8', 'vp9', 'av1'].includes(videoCodec)) return 'direct';
     if (isOgg && ['theora'].includes(videoCodec)) return 'direct';
 

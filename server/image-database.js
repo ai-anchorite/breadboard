@@ -6,6 +6,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const sizeOf = require('image-size');
 
 const SAMPLE_SIZE = 64 * 1024; // 64KB head + tail sampling
 
@@ -189,6 +190,21 @@ class ImageDatabase {
     const filename = path.basename(filePath);
     const now = Date.now();
 
+    // Always read dimensions from the file header — crawler metadata can be
+    // wrong for tiled/upscaled outputs which often record tile size, not output size.
+    let width = null;
+    let height = null;
+    try {
+        const dims = sizeOf(filePath);
+      width = dims.width;
+      height = dims.height;
+    } catch (e) {
+      // Fall back to crawler-provided dimensions if header read fails
+      console.log(`[dimensions] header read failed for ${path.basename(filePath)}: ${e.message}, falling back to crawler`);
+      width = metadata.width != null ? parseInt(metadata.width) : null;
+      height = metadata.height != null ? parseInt(metadata.height) : null;
+    }
+
     // Compute subfolder relative to root_path
     const dirName = path.dirname(filePath);
     const relative = path.relative(rootPath, dirName);
@@ -251,8 +267,8 @@ class ImageDatabase {
       metadata.model_hash || null,
       metadata.model_url || null,
       metadata.loras || null,
-      metadata.width != null ? parseInt(metadata.width) : null,
-      metadata.height != null ? parseInt(metadata.height) : null,
+      width,
+      height,
       metadata.aesthetic_score != null ? parseFloat(metadata.aesthetic_score) : null,
       metadata.controlnet_module || null,
       metadata.controlnet_model || null,

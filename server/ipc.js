@@ -50,7 +50,7 @@ class IPC {
       }
     }
     const savedTheme = this.imageDb ? this.imageDb.getSetting('theme') : null
-    this.theme = savedTheme || (config && config.theme ? config.theme : "default")
+    this.theme = savedTheme || (config && config.theme ? config.theme : "dark")
     this.config = config
     this.gm = this.config.gm
     if (!this.ipc) {

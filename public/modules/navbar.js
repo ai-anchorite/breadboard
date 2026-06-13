@@ -76,11 +76,11 @@ class Navbar {
   // Settings Sidebar (slide-out from right)
   // =============================================
 
-  async toggleSettings() {
+  async toggleSettings(force) {
     const sidebar = document.getElementById('settings-sidebar')
     if (!sidebar) return
-    if (sidebar.classList.contains('hidden')) {
-      // Position between nav and footer — overlap by 1px to eliminate gap
+    const shouldOpen = force === true || (force !== false && sidebar.classList.contains('hidden'))
+    if (shouldOpen) {
       const nav = document.querySelector('nav')
       const footer = document.querySelector('footer')
       const navH = nav ? nav.offsetHeight - 1 : 0
@@ -90,9 +90,28 @@ class Navbar {
 
       await this.renderSettings(sidebar)
       sidebar.classList.remove('hidden')
+      this._attachSettingsOutsideClose(sidebar)
     } else {
       sidebar.classList.add('hidden')
+      this._detachSettingsOutsideClose()
     }
+  }
+
+  _attachSettingsOutsideClose(sidebar) {
+    this._detachSettingsOutsideClose()
+    this._settingsOutsideHandler = (e) => {
+      if (sidebar.classList.contains('hidden')) return
+      if (sidebar.contains(e.target)) return
+      if (e.target.closest?.('#settings-option')) return
+      this.toggleSettings(false)
+    }
+    setTimeout(() => document.addEventListener('mousedown', this._settingsOutsideHandler), 0)
+  }
+
+  _detachSettingsOutsideClose() {
+    if (!this._settingsOutsideHandler) return
+    document.removeEventListener('mousedown', this._settingsOutsideHandler)
+    this._settingsOutsideHandler = null
   }
 
   async renderSettings(sidebar) {
@@ -214,8 +233,8 @@ class Navbar {
     `
 
     // --- Wire up events ---
-    sidebar.querySelector('.sb-close').addEventListener('click', () => this.toggleSettings())
-    sidebar.querySelector('.sb-close-bottom').addEventListener('click', () => this.toggleSettings())
+    sidebar.querySelector('.sb-close').addEventListener('click', () => this.toggleSettings(false))
+    sidebar.querySelector('.sb-close-bottom').addEventListener('click', () => this.toggleSettings(false))
 
     // Theme
     sidebar.querySelectorAll('.sb-theme-row button').forEach(btn => {
@@ -433,7 +452,7 @@ class Navbar {
           popper.querySelectorAll('.fp-disconnect').forEach(btn => {
             btn.addEventListener('click', async () => {
               const folderPath = btn.dataset.path
-              if (confirm(`Disconnect "${folderPath}"?`)) {
+              if (await this.app.confirm(`Disconnect "${folderPath}"?`)) {
                 await this.app.api.removeFolder(folderPath)
                 instance.hide()
                 await this.app.draw()

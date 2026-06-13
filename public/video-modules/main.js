@@ -10,7 +10,7 @@ class VideoApp {
     this.zoom = 100
     this.autoHideNav = false
     this.confirmDelete = true
-    this.theme = { val: THEME || 'default' }
+    this.theme = { val: THEME || 'dark' }
     this.minimal = { val: 'default' }
     this.style = { aspect_ratio: 100, fit: 'cover', grid_mode: 'flex' }
     this.video_limit = 0
@@ -137,7 +137,6 @@ class VideoApp {
 
     if (this.autoHideNav) {
       nav.classList.add('autohide')
-      if (this.bookmarkBar) this.bookmarkBar.classList.add('autohide')
       
       const dragZone = document.createElement('div')
       dragZone.id = 'autohide-drag-zone'
@@ -146,7 +145,6 @@ class VideoApp {
         if (e.clientY <= 8) {
           if (this._navHideTimer) { clearTimeout(this._navHideTimer); this._navHideTimer = null }
           nav.classList.add('force-show')
-          if (this.bookmarkBar) this.bookmarkBar.classList.add('force-show')
         }
       }
       document.addEventListener('mousemove', this._navTriggerMove)
@@ -154,42 +152,25 @@ class VideoApp {
         if (this._navHideTimer) clearTimeout(this._navHideTimer)
         this._navHideTimer = setTimeout(() => { 
           nav.classList.remove('force-show')
-          if (this.bookmarkBar) this.bookmarkBar.classList.remove('force-show')
           this._navHideTimer = null 
         }, 600)
       }
       nav.addEventListener('mouseleave', this._navMouseLeave)
       nav.addEventListener('mouseenter', () => { if (this._navHideTimer) { clearTimeout(this._navHideTimer); this._navHideTimer = null } })
-      
-      // Also handle bookmark bar hover
-      if (this.bookmarkBar) {
-        this.bookmarkBar.addEventListener('mouseenter', () => { 
-          if (this._navHideTimer) { clearTimeout(this._navHideTimer); this._navHideTimer = null }
-          nav.classList.add('force-show')
-          this.bookmarkBar.classList.add('force-show')
-        })
-        this.bookmarkBar.addEventListener('mouseleave', () => {
-          if (this._navHideTimer) clearTimeout(this._navHideTimer)
-          this._navHideTimer = setTimeout(() => { 
-            nav.classList.remove('force-show')
-            this.bookmarkBar.classList.remove('force-show')
-            this._navHideTimer = null 
-          }, 600)
-        })
-      }
-      
-      const container = document.querySelector('.container')
-      if (container) container.style.paddingTop = '6px'
+
+      this._updateContainerPadding()
     } else {
       nav.classList.remove('autohide')
       nav.classList.remove('force-show')
-      if (this.bookmarkBar) {
-        this.bookmarkBar.classList.remove('autohide')
-        this.bookmarkBar.classList.remove('force-show')
-      }
-      const container = document.querySelector('.container')
-      if (container) container.style.paddingTop = nav.offsetHeight + 'px'
+      this._updateContainerPadding()
     }
+  }
+
+  _updateContainerPadding() {
+    const container = document.querySelector('.container')
+    const nav = document.querySelector('nav')
+    if (!container || !nav) return
+    container.style.paddingTop = (this.autoHideNav ? 6 : nav.offsetHeight) + 'px'
   }
 
   confirm(message) {
@@ -233,6 +214,7 @@ class VideoApp {
     document.querySelector('#show-bookmark-bar')?.addEventListener('change', async (e) => {
       await this.api.setVideoSetting('show_bookmark_bar', e.target.checked)
       await this.refreshBookmarkBar()
+      this._updateContainerPadding()
     })
 
     // Bookmark current search
@@ -424,7 +406,7 @@ class VideoApp {
             if (paths && paths.length > 0) { for (const p of paths) { await this.api.addVideoFolder(p, { recursive }); await this.scanFolder(p, recursive) }; instance.hide(); await this.loadVideos() }
           })
           popper.querySelectorAll('.fp-disconnect').forEach(b => b.addEventListener('click', async () => {
-            if (window.confirm(`Disconnect "${b.dataset.path}"?`)) { await this.api.removeVideoFolder(b.dataset.path); instance.hide(); await this.loadVideos() }
+            if (await this.confirm(`Disconnect "${b.dataset.path}"?`)) { await this.api.removeVideoFolder(b.dataset.path); instance.hide(); await this.loadVideos() }
           }))
           popper.querySelectorAll('.fp-recursive').forEach(input => input.addEventListener('change', async () => {
             const recursive = input.checked
@@ -463,12 +445,6 @@ class VideoApp {
     if (!this.bookmarkBar) return
     
     // Position bookmark bar below nav
-    const nav = document.querySelector('nav')
-    if (nav) {
-      const navHeight = nav.offsetHeight
-      this.bookmarkBar.style.top = `${navHeight}px`
-    }
-    
     const bookmarkToggle = document.querySelector('#show-bookmark-bar')
     const showBookmarkBarRes = await this.api.getVideoSetting('show_bookmark_bar')
     const legacySubfolderBarRes = showBookmarkBarRes.val == null ? await this.api.getVideoSetting('show_subfolders') : { val: null }
@@ -549,6 +525,7 @@ class VideoApp {
       console.error('Error loading subfolders:', e)
       this.bookmarkBar.classList.add('hidden')
     }
+    this._updateContainerPadding()
   }
 
   openBookmarkMenu(folder, chip) {
@@ -622,10 +599,13 @@ class VideoApp {
     const content = document.querySelector('.content')
     if (!content) return
     if (this.videos.length === 0) {
+      const container = document.querySelector('.container')
+      if (container) container.setAttribute('data-grid', 'flex')
       content.innerHTML = `<div class='video-empty'><i class="fa-solid fa-video"></i><h2>No videos loaded</h2><p>Click the <i class="fa-solid fa-folder-open"></i> folder icon to connect a video folder</p></div>`
       this._updateEndMarker()
       return
     }
+    this.applyGridMode()
     content.innerHTML = this.videos.map(v => this.createCard(v)).join('')
     this.attachCardHandlers()
     this.initDragSelect()
@@ -848,12 +828,7 @@ class VideoApp {
       if (!this._navWasAutoHide) nav.classList.add('autohide')
       nav.classList.remove('force-show')
     }
-    // Also hide bookmark bar during viewer
-    if (this.bookmarkBar) {
-      this._bookmarkWasAutoHide = this.bookmarkBar.classList.contains('autohide')
-      if (!this._bookmarkWasAutoHide) this.bookmarkBar.classList.add('autohide')
-      this.bookmarkBar.classList.remove('force-show')
-    }
+    // Also hide bookmark bar during viewer — now handled by nav autohide
     this._keyHandler = (e) => {
       if (e.target.tagName === 'INPUT') return
       if (e.key === 'Escape') this._closeViewer()
@@ -1180,17 +1155,8 @@ class VideoApp {
     const overlay = document.getElementById('bb-viewer-overlay'); if (overlay) overlay.remove()
     if (this._keyHandler && !silent) { document.removeEventListener('keydown', this._keyHandler); this._keyHandler = null }
     if (!silent) {
-      // Restore nav — re-apply the full auto-hide logic to ensure clean state
       this.applyAutoHideNav()
       this._navWasAutoHide = undefined
-      // Restore bookmark bar state
-      if (this.bookmarkBar && this._bookmarkWasAutoHide !== undefined) {
-        if (!this._bookmarkWasAutoHide) {
-          this.bookmarkBar.classList.remove('autohide')
-          this.bookmarkBar.classList.remove('force-show')
-        }
-        this._bookmarkWasAutoHide = undefined
-      }
       this._resetAllPlayLocks()
     }
     this._viewerOpen = false

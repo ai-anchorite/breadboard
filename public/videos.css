@@ -53,32 +53,6 @@
   opacity: 0.4;
 }
 
-.video-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 60vh;
-  text-align: center;
-  padding: 40px;
-  padding-top: 60px;
-  opacity: 0.5;
-}
-.video-empty > i {
-  font-size: 4rem;
-  margin-bottom: 20px;
-}
-.video-empty h2 {
-  margin: 0 0 10px 0;
-  font-size: 1.5rem;
-  font-weight: normal;
-}
-.video-empty p {
-  margin: 0;
-  font-size: 0.9rem;
-}
-
 /* --- Video Card --- */
 .video-card {
   display: block;

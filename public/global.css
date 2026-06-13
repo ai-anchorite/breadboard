@@ -267,6 +267,33 @@ nav input {
 .end-marker .fa-chess-board {
   opacity: 0.4;
 }
+
+/* --- Empty state (shared by image and video tabs) --- */
+.video-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 60vh;
+  text-align: center;
+  padding: 40px;
+  padding-top: 60px;
+  opacity: 0.5;
+}
+.video-empty > i {
+  font-size: 4rem;
+  margin-bottom: 20px;
+}
+.video-empty h2 {
+  margin: 0 0 10px 0;
+  font-size: 1.5rem;
+  font-weight: normal;
+}
+.video-empty p {
+  margin: 0;
+  font-size: 0.9rem;
+}
 /* --- Grid Layout: Flex (default) --- */
 .container[data-grid="flex"] .content,
 .container:not([data-grid]) .content {
@@ -288,7 +315,7 @@ nav input {
   break-inside: avoid;
 }
 .container[data-grid="masonry"] .card:not(.expanded) > img {
-  aspect-ratio: var(--card-ar, var(--card-aspect-ratio));
+  aspect-ratio: var(--card-ar, 1);
   width: 100% !important;
   height: auto !important;
   display: block;
@@ -1290,6 +1317,9 @@ body.default[data-minimal='minimal'] .card:hover .grab {
 body.default .empty-container {
   color: #111;
 }
+body.default .video-empty {
+  color: #111;
+}
 body.default .search-box {
   background: rgba(0,0,100,0.05);
 }
@@ -1487,6 +1517,9 @@ body.dark[data-minimal='minimal'] .card:hover .grab {
   background: rgba(176,206,240,0.16);
 }
 body.dark .empty-container {
+  color: #eee;
+}
+body.dark .video-empty {
   color: #eee;
 }
 body.dark .search-box {
@@ -2167,68 +2200,23 @@ body.default .sb-btn.active { background: royalblue; color: white; border-color:
   color: #4c84ff;
 }
 
-/* --- Bookmark Bar --- */
+/* --- Bookmark Bar (nav child — inherits autohide, frosted glass, scrollbar) --- */
 .bookmark-bar {
-  position: fixed;
-  top: 60px;
-  left: 0;
-  right: 0;
-  z-index: 9998;
-  padding: 8px 12px;
+  width: 100%;
+  flex-basis: 100%;
+  order: 10;
+  padding: 6px 12px;
   display: flex;
   align-items: center;
   gap: 8px;
   overflow-x: auto;
   overflow-y: hidden;
   white-space: nowrap;
-  min-height: 40px;
-  transition: transform 0.25s ease, opacity 0.25s ease;
-}
-
-body.default .bookmark-bar {
-  background: rgba(240,240,240,0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(0,0,0,0.08);
-}
-
-body.dark .bookmark-bar {
-  background: rgba(0,0,0,0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  min-height: 36px;
 }
 
 .bookmark-bar.hidden {
   display: none !important;
-}
-
-.bookmark-bar.autohide {
-  transform: translateY(-100%);
-  opacity: 0;
-  pointer-events: none;
-  transition: transform 0.5s ease 0.3s, opacity 0.5s ease 0.3s;
-}
-
-.bookmark-bar.autohide.force-show {
-  transform: translateY(0);
-  opacity: 1;
-  pointer-events: auto;
-  transition: transform 0.2s ease, opacity 0.2s ease;
-}
-
-.bookmark-bar::-webkit-scrollbar {
-  height: 6px;
-}
-.bookmark-bar::-webkit-scrollbar-track {
-  background: rgba(128, 128, 128, 0.1);
-}
-.bookmark-bar::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.4);
-  border-radius: 3px;
-}
-.bookmark-bar::-webkit-scrollbar-thumb:hover {
-  background: rgba(128, 128, 128, 0.6);
 }
 
 /* --- Bookmark Chips --- */
@@ -2334,12 +2322,6 @@ body.dark .bookmark-folder-menu {
   background: rgba(76, 132, 255, 0.2);
   border-color: rgba(76, 132, 255, 0.4);
 }
-
-/* Adjust container padding when bookmark bar is visible */
-body:has(.bookmark-bar:not(.hidden)) .container {
-  padding-top: 108px;
-}
-
 /* Dark theme overrides for bookmark bar */
 body.dark .bookmark-chip {
   background: rgba(255, 255, 255, 0.08);

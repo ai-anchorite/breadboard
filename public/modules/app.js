@@ -180,8 +180,10 @@ class App {
           }
         }
       } else {
-        // Sync progress — server is indexing, just update the progress bar
+        // Sync progress — server is indexing, show running count
         this.sync_counter++;
+        const status = document.querySelector('.status')
+        if (status) status.innerHTML = `indexing images... ${this.sync_counter}`
         if (this.sync_counter === value.total) {
           this.sync_complete = true
         }
@@ -293,7 +295,6 @@ class App {
 
     if (this.autoHideNav) {
       nav.classList.add('autohide')
-      if (this.bookmarkBar) this.bookmarkBar.classList.add('autohide')
 
       const dragZone = document.createElement('div')
       dragZone.id = 'autohide-drag-zone'
@@ -306,7 +307,6 @@ class App {
             this._navHideTimer = null
           }
           nav.classList.add('force-show')
-          if (this.bookmarkBar) this.bookmarkBar.classList.add('force-show')
         }
       }
       document.addEventListener('mousemove', this._navTriggerMove)
@@ -315,7 +315,6 @@ class App {
         if (this._navHideTimer) clearTimeout(this._navHideTimer)
         this._navHideTimer = setTimeout(() => {
           nav.classList.remove('force-show')
-          if (this.bookmarkBar) this.bookmarkBar.classList.remove('force-show')
           this._navHideTimer = null
         }, 600)
       }
@@ -328,39 +327,26 @@ class App {
         }
       })
 
-      if (this.bookmarkBar) {
-        this.bookmarkBar.addEventListener('mouseenter', () => {
-          if (this._navHideTimer) { clearTimeout(this._navHideTimer); this._navHideTimer = null }
-          this.bookmarkBar.classList.add('force-show')
-        })
-        this.bookmarkBar.addEventListener('mouseleave', () => {
-          if (this._navHideTimer) clearTimeout(this._navHideTimer)
-          this._navHideTimer = setTimeout(() => {
-            this.bookmarkBar.classList.remove('force-show')
-            this._navHideTimer = null
-          }, 600)
-        })
-      }
-
-      const container = document.querySelector('.container')
-      if (container) container.style.paddingTop = '6px'
+      this._updateContainerPadding()
     } else {
       nav.classList.remove('autohide')
       nav.classList.remove('force-show')
-      if (this.bookmarkBar) {
-        this.bookmarkBar.classList.remove('autohide')
-        this.bookmarkBar.classList.remove('force-show')
-      }
 
-      const container = document.querySelector('.container')
-      if (container) container.style.paddingTop = nav.offsetHeight + 'px'
+      this._updateContainerPadding()
     }
+  }
+
+  _updateContainerPadding() {
+    const container = document.querySelector('.container')
+    const nav = document.querySelector('nav')
+    if (!container || !nav) return
+    container.style.paddingTop = (this.autoHideNav ? 6 : nav.offsetHeight) + 'px'
   }
 
   async init_theme () {
     let themeRes = await this.api.getSetting('theme')
     let minimalRes = await this.api.getSetting('minimal')
-    this.theme = { val: themeRes.val || "default" }
+    this.theme = { val: themeRes.val || "dark" }
     this.minimal = { val: minimalRes.val || "default" }
     document.body.className = this.theme.val
     document.body.setAttribute("data-minimal", this.minimal.val)
@@ -433,7 +419,7 @@ class App {
     document.querySelector("#sync").disabled = true
     document.querySelector("#sync i").classList.add("fa-spin")
     if (paths) {
-      document.querySelector(".status").innerHTML = "synchronizing..."
+      document.querySelector(".status").innerHTML = "indexing images..."
       this.sync_counter = 0
       this.sync_complete = false
       await new Promise((resolve, reject) => {
@@ -451,7 +437,7 @@ class App {
       if (this.sync_mode === "reindex" || this.sync_mode === "default" || this.sync_mode === "false") {
         for (let folder of folders) {
           let root_path = folder.path
-          document.querySelector(".status").innerHTML = "synchronizing from " + root_path
+          document.querySelector(".status").innerHTML = "indexing from " + root_path
           this.sync_counter = 0
           this.sync_complete = false
           await new Promise((resolve, reject) => {
@@ -469,7 +455,7 @@ class App {
           })
         }
       } else if (this.sync_mode === "reindex_folder" && this.sync_folder && this.sync_folder.length > 0) {
-        document.querySelector(".status").innerHTML = "synchronizing from " + this.sync_folder
+        document.querySelector(".status").innerHTML = "indexing from " + this.sync_folder
         this.sync_counter = 0
         this.sync_complete = false
         await new Promise((resolve, reject) => {
@@ -511,11 +497,17 @@ class App {
       return { ...item, tokens }
     })
 
+    let missingDims = 0
     let data = items.map((item) => {
       const ar = item.width && item.height ? (item.width / item.height) : null
+      if (!ar) {
+        missingDims++
+        if (missingDims <= 3) console.log(`[fill] missing dimensions for ${item.filename} — w=${item.width} h=${item.height}`)
+      }
       const arStyle = ar ? `--card-ar:${ar};` : ''
       return `<div class='card' data-root="${item.root_path}" data-src="${item.file_path}" data-fingerprint="${item.fingerprint}" style='${arStyle}'>${card(item, this.stripPunctuation)}</div>`
     })
+    if (missingDims > 0) console.log(`[fill] ${missingDims} of ${items.length} images missing dimensions`)
 
     document.querySelector(".content").innerHTML = data.join("")
 
@@ -565,6 +557,7 @@ class App {
 
     this.images = result.results
     if (result.results.length > 0) {
+      this.applyGridMode()
       await this.fill(result)
       document.querySelector("#sync").classList.remove("disabled")
       document.querySelector("#sync").disabled = false
@@ -573,6 +566,8 @@ class App {
       this.images = []
       await this.fill(result)
       if (!this.query) {
+        const container = document.querySelector('.container')
+        if (container) container.setAttribute('data-grid', 'flex')
         document.querySelector(".content").innerHTML = `<div class='video-empty'><i class="fa-solid fa-image"></i><h2>No images loaded</h2><p>Click the <i class="fa-solid fa-folder-open"></i> folder icon to connect an image folder</p></div>`
         this._updateEndMarker()
       }
@@ -605,8 +600,10 @@ class App {
     document.querySelector('#show-bookmark-bar')?.addEventListener('change', async (e) => {
       await this.api.setSetting('show_bookmark_bar', e.target.checked)
       this.showBookmarkBar = e.target.checked
-      if (e.target.checked) { await this.refreshBookmarkBar() }
+      if (e.target.checked) {     await this.refreshBookmarkBar()
+  }
       else { this.bookmarkBar.classList.add('hidden'); this.closeBookmarkMenu() }
+      this._updateContainerPadding()
     })
 
     await this.refreshBookmarkBar()
@@ -616,10 +613,6 @@ class App {
     if (!this.bookmarkBar) return
 
     const nav = document.querySelector('nav')
-    if (nav) {
-      const navHeight = nav.offsetHeight
-      this.bookmarkBar.style.top = `${navHeight}px`
-    }
 
     if (!this.showBookmarkBar) {
       this.bookmarkBar.classList.add('hidden')
@@ -693,6 +686,7 @@ class App {
       console.error('Error loading bookmarks:', e)
       this.bookmarkBar.classList.add('hidden')
     }
+    this._updateContainerPadding()
   }
 
   openBookmarkMenu(folder, chip) {
