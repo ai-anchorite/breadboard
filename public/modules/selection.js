@@ -169,11 +169,13 @@ class Selection {
       document.querySelector(".tag-menu-expanded").classList.toggle("hidden")
     })
     document.querySelector("#remove-tags").addEventListener("click", async (e) => {
-      let tags = this.removeTagInput.value.split(",")
+      let tags = this.removeTagInput.value.split(",").map(t => t.trim()).filter(t => t)
+      if (tags.length === 0) return
       let selected = this.els.map((el) => {
         return el.getAttribute("data-src")
       })
-      let response = await this.api.gm({
+      let fps = this.els.map(el => el.getAttribute('data-fingerprint')).filter(Boolean)
+      await this.api.gm({
         path: "user",
         cmd: "set",
         args: [
@@ -188,6 +190,7 @@ class Selection {
           }
         ]
       })
+      if (fps.length > 0) await this.api.removeImageTags(fps, tags)
       let paths = this.els.map((el) => {
         return {
           file_path: el.getAttribute("data-src"),
@@ -195,44 +198,33 @@ class Selection {
         }
       })
       await this.app.synchronize(paths, async () => {
-        document.querySelector("footer").classList.add("hidden")
-        this.els = []
+        this.removeTagInput.value = ''
+        this.removetags.remove_tag(this.removeTagInput.value)
         document.querySelector(".status").innerHTML = ""
-        let query = document.querySelector(".search").value
-        if (query && query.length > 0) {
-          await this.app.search(query)
-        } else {
-          await this.app.search()
-        }
+        await this.app.draw()
         bar.go(100)
       })
     })
     document.querySelector("#save-tags").addEventListener("click", async (e) => {
 
-      let tags = this.addTagInput.value.split(",")
+      let tags = this.addTagInput.value.split(",").map(t => t.trim()).filter(t => t)
+      if (tags.length === 0) return
       let selected = this.els.map((el) => {
         return el.getAttribute("data-src")
       })
+      let fps = this.els.map(el => el.getAttribute('data-fingerprint')).filter(Boolean)
       let response = await this.api.gm({
         path: "user",
         cmd: "set",
         args: [
           selected,
           {
-            "dc:subject": [{
-              val: tags,
-              mode: "merge"
-            }]
+            "dc:subject": tags.map(t => ({ val: t, mode: "merge" }))
           }
         ]
       })
-      let items = tags.map((x) => {
-        if (x.split(" ").length > 1) {
-          return `tag:"${x}"`
-        } else {
-          return "tag:" + x
-        }
-      })
+      // Also write via SQLite API for immediate query availability
+      if (fps.length > 0) await this.api.addImageTags(fps, tags)
       let paths = this.els.map((el) => {
         return {
           file_path: el.getAttribute("data-src"),
@@ -240,18 +232,12 @@ class Selection {
         }
       })
       await this.app.synchronize(paths, async () => {
-        document.querySelector("footer").classList.add("hidden")
-        this.els = []
+        this.addTagInput.value = ''
+        this.addtags.remove_tag(this.addTagInput.value)
         document.querySelector(".status").innerHTML = ""
-        let query = items.join(" ")
-        if (query && query.length > 0) {
-          await this.app.search(query)
-        } else {
-          await this.app.search()
-        }
+        await this.app.draw()
         this.app.bar.go(100)
       })
-
     })
     document.querySelector("#delete-selected").addEventListener("click", async (e) => {
       await this.del()
@@ -376,9 +362,46 @@ class Selection {
     })
     if (items.length > 0) {
       document.querySelector("footer").classList.remove("hidden")
+      this._renderSelectionTags()
     } else {
       document.querySelector("footer").classList.add("hidden")
     }
+  }
+
+  async _renderSelectionTags() {
+    const container = document.querySelector('#selection-tags')
+    if (!container || this.els.length === 0) return
+    const fps = this.els.map(el => el.getAttribute('data-fingerprint')).filter(Boolean)
+    if (fps.length === 0) { container.innerHTML = ''; return }
+    // Fetch tags for the first few items to find common ones
+    let commonTags = null
+    for (const fp of fps.slice(0, 20)) {
+      try {
+        const meta = await this.api.getImage(fp)
+        if (!meta || !meta.tags) continue
+        if (commonTags === null) {
+          commonTags = new Set(meta.tags)
+        } else {
+          commonTags = new Set(meta.tags.filter(t => commonTags.has(t)))
+        }
+      } catch (e) {}
+    }
+    if (!commonTags || commonTags.size === 0) { container.innerHTML = ''; return }
+    container.innerHTML = Array.from(commonTags).map(t =>
+      `<span class='sel-tag'><i class="fa-solid fa-tag"></i> ${t}<i class='fa-solid fa-xmark sel-tag-remove' data-tag='${t}'></i></span>`
+    ).join('')
+    // Wire remove handlers
+    container.querySelectorAll('.sel-tag-remove').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        const tag = el.getAttribute('data-tag')
+        const fprints = this.els.map(el => el.getAttribute('data-fingerprint')).filter(Boolean)
+        if (fprints.length > 0 && tag) {
+          await this.api.removeImageTags(fprints, [tag])
+          await this._renderSelectionTags()
+        }
+      })
+    })
   }
   inputFocused(e) {
     let target = e.target || e.srcElement;

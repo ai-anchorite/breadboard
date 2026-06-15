@@ -318,8 +318,46 @@ class VideoApp {
 
   updateSelection() {
     document.querySelector('.selected-count .counter').innerHTML = this.selectedEls.length
-    if (this.selectedEls.length > 0) document.querySelector('footer')?.classList.remove('hidden')
-    else document.querySelector('footer')?.classList.add('hidden')
+    if (this.selectedEls.length > 0) {
+      document.querySelector('footer')?.classList.remove('hidden')
+      this._renderSelectionTags()
+    } else {
+      document.querySelector('footer')?.classList.add('hidden')
+    }
+  }
+
+  async _renderSelectionTags() {
+    const container = document.querySelector('#selection-tags')
+    if (!container || this.selectedEls.length === 0) return
+    const fps = this.selectedEls.map(el => el.getAttribute('data-fingerprint')).filter(Boolean)
+    if (fps.length === 0) { container.innerHTML = ''; return }
+    let commonTags = null
+    for (const fp of fps.slice(0, 20)) {
+      try {
+        const meta = await this.api.getVideo(fp)
+        if (!meta || !meta.tags) continue
+        if (commonTags === null) {
+          commonTags = new Set(meta.tags)
+        } else {
+          commonTags = new Set(meta.tags.filter(t => commonTags.has(t)))
+        }
+      } catch (e) {}
+    }
+    if (!commonTags || commonTags.size === 0) { container.innerHTML = ''; return }
+    container.innerHTML = Array.from(commonTags).map(t =>
+      `<span class='sel-tag'><i class="fa-solid fa-tag"></i> ${t}<i class='fa-solid fa-xmark sel-tag-remove' data-tag='${t}'></i></span>`
+    ).join('')
+    container.querySelectorAll('.sel-tag-remove').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        const tag = el.getAttribute('data-tag')
+        const fprints = this.selectedEls.map(el => el.getAttribute('data-fingerprint')).filter(Boolean)
+        if (fprints.length > 0 && tag) {
+          await this.api.removeVideoTags(fprints, [tag])
+          await this._renderSelectionTags()
+        }
+      })
+    })
   }
 
   clearSelection() {
@@ -896,7 +934,10 @@ class VideoApp {
         </div>
       </div>
       <div class='bb-viewer-panel ${this.viewerPanelHidden ? 'collapsed' : ''}' id='bb-viewer-panel'>
-        <div class='panel-header'><span>Video Info</span><span class='bb-viewer-counter-panel'></span></div>
+        <div class='panel-header'>
+          <span class='panel-title'><i class="fa-solid fa-video"></i> Video</span>
+          <span class='bb-viewer-counter-panel'></span>
+        </div>
         <div class='panel-body'></div>
       </div>`
     document.body.appendChild(overlay)
@@ -956,6 +997,15 @@ class VideoApp {
     this._syncPanelToggleIcon()
   }
 
+  _wirePanelActionButtons() {
+    const favBtn = document.querySelector('.panel-fav-btn')
+    const openBtn = document.querySelector('.panel-open-btn')
+    const deleteBtn = document.querySelector('.panel-delete-btn')
+    if (favBtn) favBtn.addEventListener('click', async (e) => { e.stopPropagation(); await this._togglePanelFavorite() })
+    if (openBtn) openBtn.addEventListener('click', (e) => { e.stopPropagation(); const fp = openBtn.getAttribute('data-fingerprint'); const v = fp ? this.videos.find(x => x.fingerprint === fp) : null; if (v) this.api.open(v.file_path) })
+    if (deleteBtn) deleteBtn.addEventListener('click', async (e) => { e.stopPropagation(); await this._trashPanelVideo() })
+  }
+
   _navigateViewer(dir) {
     const i = this._currentIndex + dir
     if (i >= 0 && i < this._cardData.length) { this._currentIndex = i; this._zoom = 1; this._panX = 0; this._panY = 0; this._showVideo(i) }
@@ -985,6 +1035,8 @@ class VideoApp {
     this._updateZoomLabel()
     this._updateSeekUI()
     await this._loadPanel(data)
+    this._updatePanelButtons(data)
+    this._wirePanelActionButtons()
   }
 
   // --- Zoom & Pan ---
@@ -1162,7 +1214,7 @@ class VideoApp {
   }
   _buildPanelHTML(meta) {
     let tagsHTML = ''
-    if (meta.tags && meta.tags.length > 0) tagsHTML = meta.tags.map(t => `<span class='panel-tag panel-filter' data-filter='tag:${t}'><i class="fa-solid fa-tag"></i> ${t}</span>`).join('')
+    if (meta.tags && meta.tags.length > 0) tagsHTML = meta.tags.map(t => `<span class='panel-tag'><span class='panel-filter' data-filter='tag:${t}'><i class="fa-solid fa-tag"></i> ${t}</span><i class='fa-solid fa-xmark panel-tag-remove' data-tag='${t}'></i></span>`).join('')
     const fields = ['filename', 'width', 'height', 'duration', 'fps', 'size', 'file_path']
     let rows = ''
     for (const key of fields) {
@@ -1174,7 +1226,12 @@ class VideoApp {
       else val = `<span class='panel-filter' data-filter='${key}:${meta[key]}'>${meta[key]}</span>`
       rows += `<tr><td class='panel-key'>${key}</td><td class='panel-val'>${val}</td></tr>`
     }
-    return `<div class='panel-tags'>${tagsHTML}<div class='panel-tag-input'><input type='text' placeholder='Add tag...' class='panel-add-tag' data-fingerprint='${meta.fingerprint || ''}'></div></div><div class='panel-meta'><table>${rows}</table></div>`
+    return `<div class='panel-actions'>
+        <button class='panel-action-btn panel-fav-btn' title='Like'><i class="fa-regular fa-heart"></i></button>
+        <button class='panel-action-btn panel-open-btn' title='Open in explorer'><i class="fa-regular fa-folder-open"></i></button>
+        <button class='panel-action-btn panel-delete-btn' title='Delete'><i class="fa-regular fa-trash-can"></i></button>
+      </div>
+      <div class='panel-tags'>${tagsHTML}<div class='panel-tag-input'><input type='text' placeholder='Add tag...' class='panel-add-tag' data-fingerprint='${meta.fingerprint || ''}'></div></div><div class='panel-meta'><table>${rows}</table></div>`
   }
   _attachPanelHandlers(container, meta) {
     const tagInput = container.querySelector('.panel-add-tag')
@@ -1189,6 +1246,74 @@ class VideoApp {
       e.stopPropagation(); const filter = el.getAttribute('data-filter')
       if (filter) { this._closeViewer(); this.query = filter; document.querySelector('.search').value = filter; this.loadVideos() }
     }))
+    container.querySelectorAll('.panel-tag-remove').forEach(el => el.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      const tag = el.getAttribute('data-tag')
+      const fp = container.querySelector('.panel-add-tag')?.getAttribute('data-fingerprint')
+      if (fp && tag) {
+        await this.api.removeVideoTags([fp], [tag])
+        const data = this._cardData[this._currentIndex]
+        if (data) await this._loadPanel(data)
+      }
+    }))
+  }
+
+  _updatePanelButtons(data) {
+    const favBtn = document.querySelector('.panel-fav-btn')
+    const openBtn = document.querySelector('.panel-open-btn')
+    const deleteBtn = document.querySelector('.panel-delete-btn')
+    if (!favBtn && !openBtn && !deleteBtn) return
+    const fp = data.fingerprint
+    if (openBtn) openBtn.setAttribute('data-fingerprint', fp || '')
+    if (deleteBtn) deleteBtn.setAttribute('data-fingerprint', fp || '')
+    this.api.getVideo(fp).then(meta => {
+      const isFav = meta.tags && meta.tags.includes('favorite')
+      if (favBtn) {
+        favBtn.setAttribute('data-fingerprint', fp || '')
+        favBtn.setAttribute('data-favorited', isFav ? 'true' : 'false')
+        favBtn.querySelector('i').className = isFav ? 'fa-solid fa-heart' : 'fa-regular fa-heart'
+      }
+    }).catch(() => {})
+    if (favBtn) favBtn.setAttribute('data-fingerprint', fp || '')
+  }
+
+  async _togglePanelFavorite() {
+    const btn = document.querySelector('.panel-fav-btn')
+    const fp = btn?.getAttribute('data-fingerprint')
+    if (!fp || !btn) return
+    const isFav = btn.getAttribute('data-favorited') === 'true'
+    if (isFav) await this.api.removeVideoTags([fp], ['favorite'])
+    else await this.api.addVideoTags([fp], ['favorite'])
+    const newFav = !isFav
+    btn.setAttribute('data-favorited', newFav)
+    const icon = btn.querySelector('i')
+    if (icon) { icon.classList.toggle('fa-regular', !newFav); icon.classList.toggle('fa-solid', newFav) }
+    // Sync card header button
+    const card = document.querySelector(`.video-card[data-fingerprint="${fp}"]`)
+    if (card) {
+      const cardBtn = card.querySelector('.favorite-btn')
+      if (cardBtn) {
+        cardBtn.setAttribute('data-favorited', newFav)
+        const cardIcon = cardBtn.querySelector('i')
+        if (cardIcon) { cardIcon.classList.toggle('fa-regular', !newFav); cardIcon.classList.toggle('fa-solid', newFav) }
+      }
+    }
+  }
+
+  async _trashPanelVideo() {
+    const btn = document.querySelector('.panel-delete-btn')
+    const fp = btn?.getAttribute('data-fingerprint')
+    if (!fp) return
+    if (!await this.confirm('Move this video to trash?')) return
+    await this.api.deleteVideos([fp])
+    if (this._cardData.length <= 1) {
+      this._closeViewer()
+    } else {
+      this._cardData = this._cardData.filter(d => d.fingerprint !== fp)
+      if (this._currentIndex >= this._cardData.length) this._currentIndex = this._cardData.length - 1
+      this._zoom = 1; this._panX = 0; this._panY = 0
+      this._showVideo(this._currentIndex)
+    }
   }
 
   _closeViewer(silent) {

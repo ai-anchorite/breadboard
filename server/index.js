@@ -1045,7 +1045,7 @@ class BreadboardServer {
       });
     })
     
-    server.listen(this.port, () => {
+    server.listen(this.port, '127.0.0.1', () => {
       console.log(`Breadboard running at http://localhost:${this.port}`)
     })
     

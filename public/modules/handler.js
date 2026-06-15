@@ -136,9 +136,9 @@ class Handler {
           <button class='bb-tb-btn bb-tb-close' title='Close (Esc)'><i class="fa-solid fa-xmark"></i></button>
         </div>
       </div>
-      <div class='bb-viewer-panel' id='bb-viewer-panel'>
+      <div class='bb-viewer-panel ${this.app.viewerPanelHidden ? 'collapsed' : ''}' id='bb-viewer-panel'>
         <div class='panel-header'>
-          <span>Image Info</span>
+          <span class='panel-title'><i class="fa-solid fa-image"></i> Image</span>
           <span class='bb-viewer-counter-panel'></span>
         </div>
         <div class='panel-body'></div>
@@ -237,6 +237,15 @@ class Handler {
     $('.bb-viewer-toolbar').addEventListener('click', (e) => e.stopPropagation())
   }
 
+  _wirePanelActionButtons() {
+    const favBtn = document.querySelector('.panel-fav-btn')
+    const openBtn = document.querySelector('.panel-open-btn')
+    const deleteBtn = document.querySelector('.panel-delete-btn')
+    if (favBtn) favBtn.addEventListener('click', async (e) => { e.stopPropagation(); await this._toggleFavorite(favBtn) })
+    if (openBtn) openBtn.addEventListener('click', (e) => { e.stopPropagation(); this.api.open(openBtn.getAttribute('data-src')) })
+    if (deleteBtn) deleteBtn.addEventListener('click', async (e) => { e.stopPropagation(); await this._trashPanelImage(deleteBtn) })
+  }
+
   // --- Navigation ---
 
   _navigate(direction) {
@@ -276,6 +285,8 @@ class Handler {
 
     this._updateZoomLabel()
     await this._loadPanel(data)
+    this._updatePanelButtons(data)
+    this._wirePanelActionButtons()
   }
 
   // --- Zoom & Pan ---
@@ -406,7 +417,7 @@ class Handler {
     let tagsHTML = ''
     if (meta.tags && meta.tags.length > 0) {
       tagsHTML = meta.tags.map(t =>
-        `<span class='panel-tag panel-filter' data-filter='tag:${t}'><i class="fa-solid fa-tag"></i> ${t}</span>`
+        `<span class='panel-tag'><span class='panel-filter' data-filter='tag:${t}'><i class="fa-solid fa-tag"></i> ${t}</span><i class='fa-solid fa-xmark panel-tag-remove' data-tag='${t}'></i></span>`
       ).join('')
     }
 
@@ -414,7 +425,9 @@ class Handler {
     if (meta.prompt) {
       const words = meta.prompt.split(/\s+/).filter(w => w.length > 0)
       const tokenized = words.map(w => `<span class='panel-token panel-filter' data-filter='${w}'>${w}</span>`).join(' ')
-      promptHTML = `<div class='panel-prompt'>${tokenized}</div>`
+      promptHTML = `<div class='panel-field-label'>Prompt</div><div class='panel-prompt'>${tokenized}</div>`
+    } else {
+      promptHTML = `<div class='panel-field-label'>Prompt</div><div class='panel-prompt'><span class='panel-empty-prompt'>no prompt recorded</span></div>`
     }
 
     const stringFields = ['agent', 'model_name', 'model_hash', 'sampler', 'loras', 'subfolder', 'controlnet_module', 'controlnet_model']
@@ -438,7 +451,7 @@ class Handler {
           const segments = String(meta[key]).split(/[\/\\]/).filter(s => s.length > 0)
           valHTML = segments.map(s => `<span class='panel-filter' data-filter='file_path:${s}'>${s}</span>`).join('<span class="panel-sep">/</span>')
         } else if (key === 'negative_prompt') {
-          valHTML = `<span class='panel-neg-prompt'>${meta[key]}</span>`
+          valHTML = `<div class='panel-neg-prompt'>${meta[key]}</div>`
         } else {
           valHTML = meta[key]
         }
@@ -459,6 +472,10 @@ class Handler {
       </div>
       <div class='panel-actions'>
         <button class='panel-btn panel-copy-prompt' data-value="${(meta.prompt || '').replace(/"/g, '&quot;')}"><i class="fa-regular fa-clone"></i> Copy Prompt</button>
+        <div class='panel-action-sep'></div>
+        <button class='panel-action-btn panel-fav-btn' title='Like'><i class="fa-regular fa-heart"></i></button>
+        <button class='panel-action-btn panel-open-btn' title='Open in explorer'><i class="fa-regular fa-folder-open"></i></button>
+        <button class='panel-action-btn panel-delete-btn' title='Delete'><i class="fa-regular fa-trash-can"></i></button>
       </div>
       <div class='panel-meta'>
         <table>${metaRows}</table>
@@ -466,6 +483,7 @@ class Handler {
   }
 
   _attachPanelHandlers(container, meta) {
+    // Copy prompt
     const copyBtn = container.querySelector('.panel-copy-prompt')
     if (copyBtn) {
       copyBtn.addEventListener('click', (e) => {
@@ -476,14 +494,13 @@ class Handler {
       })
     }
 
+    // Tag input
     const tagInput = container.querySelector('.panel-add-tag')
     if (tagInput) {
       tagInput.addEventListener('keydown', async (e) => {
         if (e.key !== 'Enter') return
-        e.preventDefault()
-        e.stopPropagation()
-        const val = tagInput.value.trim()
-        if (!val) return
+        e.preventDefault(); e.stopPropagation()
+        const val = tagInput.value.trim(); if (!val) return
         const fp = tagInput.getAttribute('data-fingerprint')
         const src = tagInput.getAttribute('data-src')
         const root = tagInput.getAttribute('data-root')
@@ -495,6 +512,7 @@ class Handler {
       })
     }
 
+    // Hyperfilter clicks on metadata values and prompt tokens
     container.querySelectorAll('.panel-filter').forEach(el => {
       el.addEventListener('click', (e) => {
         e.stopPropagation()
@@ -502,28 +520,99 @@ class Handler {
         if (filter) { this._closeOverlay(); this.app.search(filter) }
       })
     })
+
+    // Tag remove buttons
+    container.querySelectorAll('.panel-tag-remove').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        const tag = el.getAttribute('data-tag')
+        const fp = container.querySelector('.panel-add-tag')?.getAttribute('data-fingerprint')
+        if (fp && tag) {
+          const src = container.querySelector('.panel-add-tag')?.getAttribute('data-src')
+          await this.api.removeImageTags([fp], [tag])
+          if (src) await this.api.gm({ path: "user", cmd: "set", args: [src, { "dc:subject": [{ val: tag, mode: "delete" }] }] })
+          const data = this._cardData[this._currentIndex]
+          if (data) await this._loadPanel(data)
+        }
+      })
+    })
+  }
+
+  _updatePanelButtons(data) {
+    const favBtn = document.querySelector('.panel-fav-btn')
+    const openBtn = document.querySelector('.panel-open-btn')
+    const deleteBtn = document.querySelector('.panel-delete-btn')
+    if (!favBtn && !openBtn && !deleteBtn) return
+
+    this.api.getImage(data.fingerprint).then(meta => {
+      const isFav = meta.tags && meta.tags.includes('favorite')
+      if (favBtn) {
+        favBtn.setAttribute('data-fingerprint', meta.fingerprint || '')
+        favBtn.setAttribute('data-favorited', isFav ? 'true' : 'false')
+        favBtn.querySelector('i').className = isFav ? 'fa-solid fa-heart' : 'fa-regular fa-heart'
+      }
+      if (openBtn) openBtn.setAttribute('data-src', meta.file_path || '')
+      if (deleteBtn) {
+        deleteBtn.setAttribute('data-fingerprint', meta.fingerprint || '')
+        deleteBtn.setAttribute('data-src', meta.file_path || '')
+      }
+    }).catch(() => {})
+    // Also set from card data immediately (before API returns)
+    if (openBtn) openBtn.setAttribute('data-src', data.file_path || '')
+    if (deleteBtn) {
+      deleteBtn.setAttribute('data-fingerprint', data.fingerprint || '')
+      deleteBtn.setAttribute('data-src', data.file_path || '')
+    }
+    if (favBtn) favBtn.setAttribute('data-fingerprint', data.fingerprint || '')
+  }
+
+  async _trashPanelImage(btn) {
+    const fp = btn.getAttribute('data-fingerprint')
+    if (!fp) return
+    if (!await this.app.confirm('Move this image to trash?')) return
+    await this.api.deleteImages([fp])
+    // If there are more images, advance; otherwise close
+    if (this._cardData.length <= 1) {
+      this._closeOverlay()
+    } else {
+      this._cardData = this._cardData.filter(d => d.fingerprint !== fp)
+      if (this._currentIndex >= this._cardData.length) this._currentIndex = this._cardData.length - 1
+      this._zoom = 1; this._panX = 0; this._panY = 0
+      this._showImage(this._currentIndex)
+    }
   }
 
   // --- Favorite toggle ---
 
   async _toggleFavorite(btn) {
     let is_favorited = btn.getAttribute("data-favorited") === "true"
-    let src = btn.getAttribute("data-src")
-    let card = btn.closest(".card")
-    let root = card.querySelector("img").getAttribute("data-root")
-    let fp = card.getAttribute("data-fingerprint")
+    let fp = btn.getAttribute("data-fingerprint")
+    // Also try from card context if available
+    if (!fp) {
+      let card = btn.closest(".card")
+      if (card) fp = card.getAttribute("data-fingerprint")
+    }
+    if (!fp) return
     if (is_favorited) {
-      if (fp) await this.api.removeImageTags([fp], ['favorite'])
-      await this.api.gm({ path: "user", cmd: "set", args: [src, { "dc:subject": [{ val: "favorite", mode: "delete" }] }] })
+      await this.api.removeImageTags([fp], ['favorite'])
     } else {
-      if (fp) await this.api.addImageTags([fp], ['favorite'])
-      await this.api.gm({ path: "user", cmd: "set", args: [src, { "dc:subject": [{ val: "favorite", mode: "merge" }] }] })
+      await this.api.addImageTags([fp], ['favorite'])
     }
     const newFav = !is_favorited
     btn.setAttribute("data-favorited", newFav)
     const icon = btn.querySelector("i")
     icon.classList.toggle("fa-regular", !newFav)
     icon.classList.toggle("fa-solid", newFav)
+    // Also update card header button if available
+    const card = document.querySelector(`.card[data-fingerprint="${fp}"]`)
+    if (card) {
+      const cardBtn = card.querySelector('.favorite-file')
+      if (cardBtn) {
+        cardBtn.setAttribute("data-favorited", newFav)
+        const cardIcon = cardBtn.querySelector("i")
+        if (cardIcon) { cardIcon.classList.toggle("fa-regular", !newFav); cardIcon.classList.toggle("fa-solid", newFav) }
+      }
+    }
   }
 
   // --- Trash ---
