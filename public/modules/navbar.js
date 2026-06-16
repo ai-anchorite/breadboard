@@ -30,16 +30,28 @@ class Navbar {
     document.querySelector("#favorite").addEventListener("click", async () => {
       let query = document.querySelector(".search").value
       if (!query || !query.length) return
-      let favorites = await this.app.api.getFavorites()
+      let favorites = await this.app.api.getFavorites('image')
       let exists = favorites.find(f => f.query === query)
       if (exists) {
         await this.app.api.removeFavorite(exists.id)
         document.querySelector("nav #favorite").classList.remove("selected")
         document.querySelector("nav #favorite i").className = "fa-regular fa-star"
       } else {
-        await this.app.api.addFavorite(query, null, false)
+        await this.app.api.addFavorite(query, null, false, 'image')
         document.querySelector("nav #favorite").classList.add("selected")
         document.querySelector("nav #favorite i").className = "fa-solid fa-star"
+      }
+      this.app.refreshBookmarkBar()
+    })
+
+    // Search bar — handle clear (X button) and Enter
+    document.querySelector(".search").addEventListener("keyup", (e) => {
+      if (e.key === "Enter") this.app.search(e.target.value)
+    })
+    document.querySelector(".search").addEventListener("input", (e) => {
+      if (!e.target.value) {
+        this.app.query = ''
+        this.app.draw()
       }
     })
 
@@ -51,9 +63,11 @@ class Navbar {
       await this.app.search(query && query.length > 0 ? query : undefined)
     })
 
-    document.querySelector("#sync").addEventListener('click', async () => await this.app.synchronize())
-    document.querySelector(".search").addEventListener("keyup", (e) => {
-      if (e.key === "Enter") this.app.search(e.target.value)
+    document.querySelector("#sync").addEventListener('click', async () => {
+      document.querySelector(".search").value = ''
+      const app = this.app
+      app.query = ''
+      app.draw()
     })
     document.querySelector("#show-menu").addEventListener('click', () => {
       document.querySelectorAll(".nav-child").forEach(el => el.classList.toggle("shown"))
@@ -61,6 +75,9 @@ class Navbar {
 
     // Settings sidebar toggle
     document.querySelector("#settings-option").addEventListener("click", () => this.toggleSettings())
+
+    // Favorites panel toggle
+    document.querySelector("#bookmarked-filters").addEventListener("click", () => this.toggleFavorites())
 
     // Tooltips
     let buttons = ["#prev", "#next", "#sync", ".content-info", "#favorite", "#bookmarked-filters", "#favorited-items", "#folder-option", "#live-option", "#pin", "#notification", "#settings-option", "#help-option", "#new-window"]
@@ -112,6 +129,98 @@ class Navbar {
     if (!this._settingsOutsideHandler) return
     document.removeEventListener('mousedown', this._settingsOutsideHandler)
     this._settingsOutsideHandler = null
+  }
+
+  // =============================================
+  // Favorites Panel (slide-out from left)
+  // =============================================
+
+  async toggleFavorites(force) {
+    const panel = document.getElementById('favorites-panel')
+    if (!panel) return
+    const shouldOpen = force === true || (force !== false && panel.classList.contains('hidden'))
+    if (shouldOpen) {
+      const nav = document.querySelector('nav')
+      const navH = nav ? nav.offsetHeight - 1 : 0
+      panel.style.top = navH + 'px'
+      panel.style.height = `calc(100vh - ${navH}px)`
+      await this.renderFavoritesPanel(panel)
+      panel.classList.remove('hidden')
+      this._attachFavoritesOutsideClose()
+    } else {
+      panel.classList.add('hidden')
+      this._detachFavoritesOutsideClose()
+    }
+  }
+
+  async renderFavoritesPanel(panel) {
+    const favorites = await this.app.api.getFavorites('image')
+    const globals = favorites.filter(f => f.is_global)
+    const normals = favorites.filter(f => !f.is_global)
+
+    const rowHTML = (r, showDelete) => `
+      <div class='fp-row'>
+        <a href="/?query=${encodeURIComponent(r.query)}">${r.query || '(unnamed)'}</a>
+        <button class='fp-god-toggle ${r.is_global ? 'on' : ''}' data-id='${r.id}' data-global='${r.is_global ? 'global' : ''}'>
+          <i class="fa-solid ${r.is_global ? 'fa-power-off' : 'fa-eye'}"></i> ${r.is_global ? 'On' : 'God'}
+        </button>
+        ${showDelete ? `<button class='fp-delete' data-id='${r.id}' title='Delete'><i class="fa-solid fa-xmark"></i></button>` : ''}
+      </div>`
+
+    panel.innerHTML = `
+      <div class='fp-header'>
+        <h3><i class="fa-solid fa-bookmark"></i> Bookmarked Filters</h3>
+        <button class='sb-close' title='Close'><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class='fp-body'>
+        <div class='fp-section'>
+          <h4><i class="fa-solid fa-star"></i> Saved Filters</h4>
+          ${normals.length > 0 ? normals.map(r => rowHTML(r, true)).join('') : '<div class="fp-empty">No bookmarked filters yet</div>'}
+        </div>
+        <div class='fp-section-divider'></div>
+        <div class='fp-section'>
+          <h4><i class="fa-solid fa-eye"></i> God Filters</h4>
+          ${globals.length > 0 ? globals.map(r => rowHTML(r, false)).join('') : '<div class="fp-explain">God filters are invisible and apply to all queries. Use the toggle to activate or deactivate them.</div>'}
+        </div>
+      </div>`
+
+    panel.querySelector('.sb-close').addEventListener('click', () => this.toggleFavorites(false))
+    panel.querySelectorAll('.fp-god-toggle').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        const id = parseInt(btn.getAttribute('data-id'))
+        const isGlobal = btn.getAttribute('data-global') === 'global'
+        await this.app.api.setFavoriteGlobal(id, !isGlobal)
+        await this.renderFavoritesPanel(panel)
+        this.app.draw()
+      })
+    })
+    panel.querySelectorAll('.fp-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        await this.app.api.removeFavorite(parseInt(btn.getAttribute('data-id')))
+        await this.renderFavoritesPanel(panel)
+        this.app.draw()
+      })
+    })
+  }
+
+  _attachFavoritesOutsideClose() {
+    this._detachFavoritesOutsideClose()
+    const panel = document.getElementById('favorites-panel')
+    this._favOutsideHandler = (e) => {
+      if (!panel || panel.classList.contains('hidden')) return
+      if (panel.contains(e.target)) return
+      if (e.target.closest?.('#bookmarked-filters')) return
+      this.toggleFavorites(false)
+    }
+    setTimeout(() => document.addEventListener('mousedown', this._favOutsideHandler), 0)
+  }
+
+  _detachFavoritesOutsideClose() {
+    if (!this._favOutsideHandler) return
+    document.removeEventListener('mousedown', this._favOutsideHandler)
+    this._favOutsideHandler = null
   }
 
   async renderSettings(sidebar) {
@@ -587,6 +696,51 @@ class Navbar {
 </div>`,
       allowHTML: true,
     })
+  }
+
+  showHyperFilter(el, filter) {
+    // Parse filter into key + value. Formats: "tag:foo", "model_name:bar", or plain "1girl" (prompt token)
+    let key, val, excludeKey, excludeVal
+    const colonIdx = filter.indexOf(':')
+    if (colonIdx > 0) {
+      key = filter.slice(0, colonIdx)
+      val = filter.slice(colonIdx + 1)
+      excludeKey = `-${key}`
+      excludeVal = val
+    } else {
+      key = 'prompt'
+      val = filter
+      excludeKey = '-prompt'
+      excludeVal = filter
+    }
+
+    const menu = document.createElement('div')
+    menu.className = 'menu-popup'
+    menu.innerHTML = `
+      <div class='menu-item hf-include'><i class="fa-solid fa-filter"></i><span>Filter by <b>${filter}</b></span></div>
+      <hr>
+      <div class='menu-item hf-exclude'><i class="fa-solid fa-filter-circle-xmark"></i><span>Exclude <b>${filter}</b></span></div>`
+
+    tippy(el, {
+      interactive: true,
+      trigger: 'click',
+      allowHTML: true,
+      placement: 'bottom-start',
+      content: menu,
+      onHidden: (instance) => { instance.destroy() },
+      onShown: (instance) => {
+        const popper = instance.popper
+        popper.querySelector('.hf-include')?.addEventListener('click', () => {
+          instance.hide()
+          this.input(key, val)
+        })
+        popper.querySelector('.hf-exclude')?.addEventListener('click', () => {
+          instance.hide()
+          this.input(excludeKey, excludeVal)
+        })
+      }
+    })
+    el._tippy?.show()
   }
 
   // Called from app.js bootstrap

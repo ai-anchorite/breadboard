@@ -92,6 +92,7 @@ class ImageDatabase {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         query TEXT NOT NULL,
         label TEXT,
+        type TEXT NOT NULL DEFAULT 'image',
         is_global INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL
       );
@@ -118,6 +119,7 @@ class ImageDatabase {
     // Migrate: add columns if they don't exist (for existing databases)
     try { this.db.exec('ALTER TABLE folders ADD COLUMN recursive INTEGER NOT NULL DEFAULT 1'); } catch (e) { /* already exists */ }
     try { this.db.exec('ALTER TABLE images ADD COLUMN subfolder TEXT'); } catch (e) { /* already exists */ }
+    try { this.db.exec('ALTER TABLE favorites ADD COLUMN type TEXT NOT NULL DEFAULT \'image\''); } catch (e) { /* already exists */ }
 
     // Prepare frequently-used statements
     this._stmts = {
@@ -838,21 +840,23 @@ class ImageDatabase {
 
   // --- Favorites ---
 
-  addFavorite(query, label, isGlobal = false) {
+  addFavorite(query, label, isGlobal = false, type = 'image') {
     this.db.prepare(`
-      INSERT INTO favorites (query, label, is_global, created_at) VALUES (?, ?, ?, ?)
-    `).run(query, label || null, isGlobal ? 1 : 0, Date.now());
+      INSERT INTO favorites (query, label, type, is_global, created_at) VALUES (?, ?, ?, ?, ?)
+    `).run(query, label || null, type, isGlobal ? 1 : 0, Date.now());
   }
 
   removeFavorite(id) {
     this.db.prepare('DELETE FROM favorites WHERE id = ?').run(id);
   }
 
-  getFavorites() {
+  getFavorites(type) {
+    if (type) return this.db.prepare('SELECT * FROM favorites WHERE type = ? ORDER BY created_at').all(type);
     return this.db.prepare('SELECT * FROM favorites ORDER BY created_at').all();
   }
 
-  getGlobalFilters() {
+  getGlobalFilters(type) {
+    if (type) return this.db.prepare('SELECT * FROM favorites WHERE is_global = 1 AND type = ?').all(type);
     return this.db.prepare('SELECT * FROM favorites WHERE is_global = 1').all();
   }
 

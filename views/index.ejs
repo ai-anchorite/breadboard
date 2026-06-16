@@ -24,9 +24,9 @@
         <a title="videos" class='btn' href="/videos" class='btn'><i class="fa-solid fa-video"></i></a>
         <button title='back' id='prev'><i class="fa-solid fa-chevron-left"></i></button>
         <button title='forward' id='next'><i class="fa-solid fa-chevron-right"></i></button>
-        <a id='bookmarked-filters' title="bookmakred filters" class='btn' href="/favorites"><i class="fa-solid fa-star"></i></a>
+        <button id='bookmarked-filters' title="bookmarked filters"><i class="fa-solid fa-star"></i></button>
         <a id='favorited-items' title="liked items" class='btn' href="/?query=tag:favorite"><i class="fa-solid fa-heart"></i></a>
-        <button title='synchronize files' id="sync"><i class="fa-solid fa-rotate"></i></button>
+        <button title='reload' id="sync"><i class="fa-solid fa-rotate"></i></button>
         <div class='right-menu'>
           <div class='flexible'></div>
           <button id='show-menu'><i class="fa-solid fa-bars"></i></button>
@@ -90,6 +90,7 @@
     <div class='favorites'></div>
     <div class='help'></div>
     <div id='settings-sidebar' class='settings-sidebar hidden'></div>
+    <div id='favorites-panel' class='favorites-panel hidden'></div>
     <footer class='hidden'>
       <button class='selected-count'>
         <i class="fa-regular fa-hand-pointer"></i> <span class='counter'></span> SELECTED

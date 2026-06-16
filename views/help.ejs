@@ -70,7 +70,7 @@
       const VERSION = "<%=version%>"
       const init_theme = async () => {
         let theme = await db.user.settings.where({ key: "theme" }).first()
-        if (!theme) theme = { val: "default" }
+        if (!theme) theme = { val: "dark" }
         document.body.className = theme.val
         document.querySelector("html").className = theme.val
         api.theme(theme.val)

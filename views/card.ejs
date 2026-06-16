@@ -96,7 +96,7 @@
       ;(async () => {
         // Init theme
         let themeRes = await api.getSetting('theme')
-        let theme = themeRes.val || "default"
+        let theme = themeRes.val || "dark"
         document.body.className = theme
         document.querySelector("html").className = theme
 

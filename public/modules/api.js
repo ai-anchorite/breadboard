@@ -96,8 +96,8 @@ class API {
   setSetting(key, val) { return this._put(`/api/settings/${key}`, { val }) }
 
   // Favorites
-  getFavorites() { return this._get('/api/favorites') }
-  addFavorite(query, label, is_global) { return this._post('/api/favorites', { query, label, is_global }) }
+  getFavorites(type) { return this._get(`/api/favorites${type ? '?type=' + type : ''}`) }
+  addFavorite(query, label, is_global, type) { return this._post('/api/favorites', { query, label, is_global, type }) }
   removeFavorite(id) { return this._delete(`/api/favorites/${id}`, {}) }
   setFavoriteGlobal(id, is_global) { return this._put(`/api/favorites/${id}/global`, { is_global }) }
 

@@ -144,13 +144,16 @@ class BreadboardServer {
         recursive: true,
         ignoreInitial: true
       })
-      
+
       this.watcher.on("add", async (filename) => {
-        // Support multiple image formats
         const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
         const hasImageExtension = imageExtensions.some(ext => filename.toLowerCase().endsWith(ext));
         
         if (hasImageExtension) {
+          // Determine which connected folder this file belongs to
+          let root = paths.find(p => filename.startsWith(p + path.sep) || filename.startsWith(p))
+          if (!root) root = path.dirname(filename)
+
           let res
           let last_mtime
 
@@ -181,11 +184,33 @@ class BreadboardServer {
           }
           
           if (res) {
+            res.root_path = root
             for(let session in this.ipc) {
               let ipc = this.ipc[session]
               await ipc.push(res)
             }
           }
+        }
+      })
+
+      this.watcher.on("unlink", async (filename) => {
+        const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
+        if (!imageExtensions.some(ext => filename.toLowerCase().endsWith(ext))) return
+        try {
+          if (this.config.imageDb) {
+            const image = this.config.imageDb._stmts.getByPath.get(filename)
+            if (image) {
+              this.config.imageDb._stmts.deleteImage.run(image.fingerprint)
+              console.log(`Removed from index: ${filename}`)
+              // Notify all connected sessions to refresh
+              for (let session in this.ipc) {
+                let ipc = this.ipc[session]
+                ipc.queue.push({ method: "new" })
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`Failed to remove from index: ${filename}`, e.message)
         }
       })
     }
@@ -654,7 +679,7 @@ class BreadboardServer {
       // Apply global filters
       let fullQuery = query;
       try {
-        const globals = this.config.imageDb.getGlobalFilters();
+        const globals = this.config.imageDb.getGlobalFilters('image');
         if (globals.length > 0) {
           const globalStr = globals.map(g => g.query).join(' ');
           fullQuery = fullQuery ? `${fullQuery} ${globalStr}` : globalStr;
@@ -837,14 +862,14 @@ class BreadboardServer {
 
     app.get("/api/favorites", (req, res) => {
       if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
-      res.json(this.config.imageDb.getFavorites());
+      res.json(this.config.imageDb.getFavorites(req.query.type));
     })
 
     app.post("/api/favorites", express.json(), (req, res) => {
       if (!this.config.imageDb) return res.status(503).json({ error: 'Image database not initialized' });
-      const { query, label, is_global } = req.body;
+      const { query, label, is_global, type } = req.body;
       if (!query) return res.status(400).json({ error: 'query required' });
-      this.config.imageDb.addFavorite(query, label, is_global);
+      this.config.imageDb.addFavorite(query, label, is_global, type || 'image');
       res.json({ success: true });
     })
 
@@ -881,8 +906,23 @@ class BreadboardServer {
       const direction = req.query.direction != null ? parseInt(req.query.direction) : -1;
       const offset = req.query.offset != null ? parseInt(req.query.offset) : 0;
       const limit = req.query.limit != null ? parseInt(req.query.limit) : 500;
+
+      // Apply global filters (god filters)
+      let fullQuery = query;
       try {
-        const result = this.config.videoDb.search(query, { sort, direction, offset, limit });
+        if (this.config.imageDb) {
+          const globals = this.config.imageDb.getGlobalFilters('video');
+          if (globals.length > 0) {
+            const globalStr = globals.map(g => g.query).join(' ');
+            fullQuery = fullQuery ? `${fullQuery} ${globalStr}` : globalStr;
+          }
+        }
+      } catch (e) {
+        console.error('Error applying global filters:', e);
+      }
+
+      try {
+        const result = this.config.videoDb.search(fullQuery, { sort, direction, offset, limit });
         res.json({
           ...result,
           results: result.results.map((video) => this.decorateVideo(video))

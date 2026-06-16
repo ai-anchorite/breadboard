@@ -2174,6 +2174,91 @@ body.default .sb-btn.active { background: royalblue; color: white; border-color:
 }
 .sb-close-bottom:hover { opacity: 1; }
 
+/* --- Favorites Panel (left side) --- */
+.favorites-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 320px;
+  height: 100vh;
+  background: #1a1a1a;
+  color: #ddd;
+  z-index: 10001;
+  overflow-y: auto;
+  box-shadow: 2px 0 10px rgba(0,0,0,0.4);
+  transition: transform 0.25s ease;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+}
+.favorites-panel.hidden {
+  transform: translateX(-100%);
+}
+body.default .favorites-panel {
+  background: #f5f5f5;
+  color: #333;
+  box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+}
+.fp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #333;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+body.default .fp-header { border-bottom-color: #ddd; }
+.fp-header h3 { margin: 0; font-size: 14px; }
+.fp-body { padding: 16px; flex: 1; overflow-y: auto; }
+.fp-section { margin-bottom: 20px; }
+.fp-section h4 { margin: 0 0 10px 0; font-size: 13px; opacity: 0.8; }
+.fp-explain { color: #888; font-size: 11px; margin-bottom: 10px; line-height: 1.5; }
+.fp-section-divider { border-bottom: 1px solid rgba(128,128,128,0.12); margin-bottom: 20px; }
+.fp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(128,128,128,0.12);
+}
+.fp-row:last-child { border-bottom: none; }
+.fp-row a {
+  flex: 1;
+  text-decoration: none;
+  color: inherit;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fp-row a:hover { color: cornflowerblue; }
+.fp-row .fp-god-toggle {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid rgba(128,128,128,0.3);
+  border-radius: 3px;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fp-row .fp-god-toggle:hover { background: rgba(128,128,128,0.15); }
+.fp-row .fp-god-toggle.on { color: cornflowerblue; border-color: cornflowerblue; }
+.fp-delete {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 10px;
+  opacity: 0.35;
+  padding: 2px 4px;
+  transition: opacity 0.15s;
+}
+.fp-delete:hover { opacity: 0.9; color: #e55; }
+.fp-empty { color: #888; font-size: 12px; padding: 12px 0; }
+
 /* --- Folder Management Panel --- */
 .folder-panel {
   min-width: 300px;
@@ -2332,6 +2417,7 @@ body.default .sb-btn.active { background: royalblue; color: white; border-color:
   transition: all 0.15s ease;
   flex-shrink: 0;
   user-select: none;
+  padding: 6px 0 6px 12px;
 }
 
 .bookmark-chip:hover {
@@ -2356,9 +2442,20 @@ body.default .sb-btn.active { background: royalblue; color: white; border-color:
   margin-left: 2px;
 }
 
-.bookmark-menu-caret {
-  margin-left: 2px;
-  font-size: 0.68rem !important;
+.bookmark-chip-drop {
+  padding: 6px 12px 6px 4px;
+  margin: -6px 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  border-radius: 0 14px 14px 0;
+}
+.bookmark-chip-drop:hover {
+  background: rgba(128,128,128,0.12);
+}
+.bookmark-chip-drop i {
+  font-size: 0.68rem;
+  opacity: 0.6;
 }
 
 .bookmark-folder-menu {

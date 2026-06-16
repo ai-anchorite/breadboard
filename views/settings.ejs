@@ -51,7 +51,7 @@
 
     const init_theme = async () => {
       let res = await api.getSetting('theme')
-      let theme = res.val || "default"
+      let theme = res.val || "dark"
       document.body.className = theme
       document.querySelector("html").className = theme
       api.theme(theme)

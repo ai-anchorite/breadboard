@@ -415,9 +415,6 @@ class App {
   }
 
   async synchronize (paths, cb) {
-    document.querySelector("#sync").classList.add("disabled")
-    document.querySelector("#sync").disabled = true
-    document.querySelector("#sync i").classList.add("fa-spin")
     if (paths) {
       document.querySelector(".status").innerHTML = "indexing images..."
       this.sync_counter = 0
@@ -534,7 +531,7 @@ class App {
     document.querySelector(".search").value = (this.query && this.query.length ? this.query : "")
 
     if (this.query) {
-      let favorites = await this.api.getFavorites()
+      let favorites = await this.api.getFavorites('image')
       let favorited = favorites.find(f => f.query === this.query)
       if (favorited) {
         document.querySelector("nav #favorite").classList.add("selected")
@@ -559,9 +556,6 @@ class App {
     if (result.results.length > 0) {
       this.applyGridMode()
       await this.fill(result)
-      document.querySelector("#sync").classList.remove("disabled")
-      document.querySelector("#sync").disabled = false
-      document.querySelector("#sync i").classList.remove("fa-spin")
     } else {
       this.images = []
       await this.fill(result)
@@ -631,18 +625,22 @@ class App {
 
       this.bookmarkBar.classList.remove('hidden')
 
+      // Fetch saved filters for the Bookmarks chip
+      const bookmarks = await this.api.getFavorites('image')
+      const normals = bookmarks.filter(f => !f.is_global)
+
       const chips = folders.map((folder, index) => {
         const rootQuery = `root_path:${this.quoteQueryValue(folder.path)}`
         const isActive = this.query && this.query.includes(rootQuery)
         const name = this.escapeHTML(folder.name || folder.path)
         const path = this.escapeHTML(folder.path)
         const subCount = Array.isArray(folder.subfolders) ? folder.subfolders.length : 0
-        const menuHint = subCount > 0 ? 'Right-click for subfolders' : 'No indexed subfolders'
+        const menuHint = subCount > 0 ? 'Click ▼ for subfolders' : 'No indexed subfolders'
         return `<div class='bookmark-chip bookmark-folder-chip ${isActive ? 'active' : ''}' data-folder-index='${index}' title='${path} (${folder.count || 0} images). ${menuHint}'>
           <i class="fa-solid fa-folder"></i>
           <span>${name}</span>
           <span class='count'>(${folder.count || 0})</span>
-          ${subCount > 0 ? `<i class="fa-solid fa-caret-down bookmark-menu-caret"></i>` : ''}
+          ${subCount > 0 ? `<span class='bookmark-chip-drop'><i class="fa-solid fa-caret-down"></i></span>` : ''}
         </div>`
       }).join('')
 
@@ -652,11 +650,31 @@ class App {
         <span>All Images</span>
       </div>`
 
-      this.bookmarkBar.innerHTML = allChip + chips
+      const bookmarkChip = normals.length > 0 ? `<div class='bookmark-chip' id='bookmarks-chip' title='Saved Filters. Click ▼ to browse'>
+        <i class="fa-solid fa-star"></i>
+        <span>Bookmarks</span>
+        <span class='count'>(${normals.length})</span>
+        <span class='bookmark-chip-drop'><i class="fa-solid fa-caret-down"></i></span>
+      </div>` : ''
+
+      this.bookmarkBar.innerHTML = allChip + bookmarkChip + chips
       this._bookmarkFolders = folders
 
       this.bookmarkBar.querySelectorAll('.bookmark-chip').forEach(chip => {
         chip.addEventListener('click', (e) => {
+          // Caret click opens the dropdown menu
+          if (e.target.closest('.bookmark-chip-drop')) {
+            e.preventDefault()
+            e.stopPropagation()
+            if (chip.id === 'bookmarks-chip') {
+              this._openBookmarkQueryMenu(normals, chip)
+            } else if (chip.classList.contains('bookmark-folder-chip')) {
+              const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
+              if (folder) this.openBookmarkMenu(folder, chip)
+            }
+            return
+          }
+
           e.preventDefault()
           const subfolder = chip.dataset.subfolder
 
@@ -664,6 +682,9 @@ class App {
             this.query = ''
             const searchInput = document.querySelector('.search')
             if (searchInput) searchInput.value = ''
+          } else if (chip.id === 'bookmarks-chip') {
+            this.navbar.toggleFavorites(true)
+            return
           } else {
             const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
             if (!folder) return
@@ -674,12 +695,6 @@ class App {
 
           this.closeBookmarkMenu()
           this.draw()
-        })
-        chip.addEventListener('contextmenu', (e) => {
-          if (!chip.classList.contains('bookmark-folder-chip')) return
-          e.preventDefault()
-          const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
-          if (folder) this.openBookmarkMenu(folder, chip)
         })
       })
     } catch (e) {
@@ -737,6 +752,42 @@ class App {
       this._bookmarkMenu.remove()
       this._bookmarkMenu = null
     }
+  }
+
+  _openBookmarkQueryMenu(bookmarks, chip) {
+    this.closeBookmarkMenu()
+    if (!bookmarks || bookmarks.length === 0) return
+
+    const rect = chip.getBoundingClientRect()
+    const menu = document.createElement('div')
+    menu.className = 'bookmark-folder-menu'
+    menu.style.left = `${Math.max(8, rect.left)}px`
+    menu.style.top = `${rect.bottom + 6}px`
+    menu.innerHTML = bookmarks.map((b) => {
+      const label = this.escapeHTML(b.query || '(unnamed)')
+      return `<button class='bookmark-folder-menu-item' data-query='${this.escapeHTML(b.query)}'>
+        <i class="fa-solid fa-star"></i>
+        <span title='${label}'>${label}</span>
+      </button>`
+    }).join('')
+
+    menu.querySelectorAll('.bookmark-folder-menu-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const query = item.dataset.query
+        this.query = query
+        const searchInput = document.querySelector('.search')
+        if (searchInput) searchInput.value = query
+        this.closeBookmarkMenu()
+        this.draw()
+      })
+    })
+
+    document.body.appendChild(menu)
+    this._bookmarkMenu = menu
+    this._bookmarkMenuCloser = (e) => {
+      if (this._bookmarkMenu && !this._bookmarkMenu.contains(e.target)) this.closeBookmarkMenu()
+    }
+    setTimeout(() => document.addEventListener('mousedown', this._bookmarkMenuCloser), 0)
   }
 
   // --- Utilities ---

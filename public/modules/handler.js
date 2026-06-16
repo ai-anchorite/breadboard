@@ -517,7 +517,7 @@ class Handler {
       el.addEventListener('click', (e) => {
         e.stopPropagation()
         const filter = el.getAttribute('data-filter')
-        if (filter) { this._closeOverlay(); this.app.search(filter) }
+        if (filter) this.app.navbar.showHyperFilter(el, filter)
       })
     })
 

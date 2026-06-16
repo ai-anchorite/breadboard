@@ -216,7 +216,13 @@ class VideoApp {
     document.querySelector('#settings-option')?.addEventListener('click', () => this.toggleSettings())
     document.querySelector('#sorter')?.addEventListener('change', async (e) => { this.sorterCode = parseInt(e.target.value); await this.loadVideos() })
     document.querySelector('.search')?.addEventListener('keyup', (e) => { if (e.key === 'Enter') { this.query = e.target.value; this.loadVideos() } })
-    document.querySelector('#sync')?.addEventListener('click', async () => await this.scanAllFolders())
+    document.querySelector('.search')?.addEventListener('input', (e) => { if (!e.target.value) { this.query = ''; this.loadVideos() } })
+    document.querySelector('#sync')?.addEventListener('click', async () => {
+      const searchInput = document.querySelector('.search')
+      if (searchInput) searchInput.value = ''
+      this.query = ''
+      this.loadVideos()
+    })
     document.querySelector('#show-bookmark-bar')?.addEventListener('change', async (e) => {
       await this.api.setVideoSetting('show_bookmark_bar', e.target.checked)
       await this.refreshBookmarkBar()
@@ -227,22 +233,25 @@ class VideoApp {
     document.querySelector('#favorite')?.addEventListener('click', async () => {
       const query = document.querySelector('.search').value
       if (!query || !query.length) return
-      const favorites = await this.api.getFavorites()
+      const favorites = await this.api.getFavorites('video')
       const exists = favorites.find(f => f.query === query)
       if (exists) {
         await this.api.removeFavorite(exists.id)
         document.querySelector('#favorite').classList.remove('selected')
         document.querySelector('#favorite i').className = 'fa-regular fa-star'
       } else {
-        await this.api.addFavorite(query, null, false)
+        await this.api.addFavorite(query, null, false, 'video')
         document.querySelector('#favorite').classList.add('selected')
         document.querySelector('#favorite i').className = 'fa-solid fa-star'
       }
+      this.refreshBookmarkBar()
     })
+    // Favorites panel toggle
+    document.querySelector('#bookmarked-filters')?.addEventListener('click', () => this.toggleFavorites())
   }
 
   initTooltips() {
-    const buttons = ['#prev', '#next', '#sync', '.content-info', '#favorite', '#bookmarked-filters', '#favorited-items', '#bookmark-bar-toggle', '#folder-option', '#pin', '#settings-option', '#help-option', '#new-window']
+    const buttons = ['#prev', '#next', '#sync', '.content-info', '#favorite', '#favorited-items', '#bookmark-bar-toggle', '#folder-option', '#pin', '#settings-option', '#help-option', '#new-window']
     for (const sel of buttons) {
       const el = document.querySelector(sel)
       if (el) tippy(el, { placement: 'bottom-end', interactive: true, content: el.getAttribute('title') })
@@ -383,8 +392,6 @@ class VideoApp {
           this._scanCount = 0
           this._scanning = true
           if (status) status.innerHTML = 'scanning videos...'
-          document.querySelector('#sync')?.classList.add('disabled')
-          document.querySelector('#sync i')?.classList.add('fa-spin')
           this.bar.go(10)
         } else if (progress.type === 'file') {
           this._scanCount++
@@ -393,8 +400,6 @@ class VideoApp {
         } else if (progress.type === 'complete') {
           this._scanning = false
           if (status) status.innerHTML = ''
-          document.querySelector('#sync')?.classList.remove('disabled')
-          document.querySelector('#sync i')?.classList.remove('fa-spin')
           this.bar.go(100)
           this.loadVideos()
         } else if (progress.type === 'error') {
@@ -513,19 +518,23 @@ class VideoApp {
       }
       
       this.bookmarkBar.classList.remove('hidden')
-      
+
+      // Fetch saved filters for the Bookmarks chip
+      const bookmarks = await this.api.getFavorites('video')
+      const normals = bookmarks.filter(f => !f.is_global)
+
       const chips = folders.map((folder, index) => {
         const rootQuery = `root_path:${this.quoteQueryValue(folder.path)}`
         const isActive = this.query.includes(rootQuery)
         const name = this.escapeHTML(folder.name || folder.path)
         const path = this.escapeHTML(folder.path)
         const subCount = Array.isArray(folder.subfolders) ? folder.subfolders.length : 0
-        const menuHint = subCount > 0 ? 'Right-click for subfolders' : 'No indexed subfolders'
+        const menuHint = subCount > 0 ? 'Click ▼ for subfolders' : 'No indexed subfolders'
         return `<div class='bookmark-chip bookmark-folder-chip ${isActive ? 'active' : ''}' data-folder-index='${index}' title='${path} (${folder.count || 0} videos). ${menuHint}'>
           <i class="fa-solid fa-folder"></i>
           <span>${name}</span>
           <span class='count'>(${folder.count || 0})</span>
-          ${subCount > 0 ? `<i class="fa-solid fa-caret-down bookmark-menu-caret"></i>` : ''}
+          ${subCount > 0 ? `<span class='bookmark-chip-drop'><i class="fa-solid fa-caret-down"></i></span>` : ''}
         </div>`
       }).join('')
       
@@ -534,12 +543,32 @@ class VideoApp {
         <i class="fa-solid fa-video"></i>
         <span>All Videos</span>
       </div>`
-      
-      this.bookmarkBar.innerHTML = allChip + chips
+
+      const bookmarkChip = normals.length > 0 ? `<div class='bookmark-chip' id='bookmarks-chip' title='Saved Filters. Click ▼ to browse'>
+        <i class="fa-solid fa-star"></i>
+        <span>Bookmarks</span>
+        <span class='count'>(${normals.length})</span>
+        <span class='bookmark-chip-drop'><i class="fa-solid fa-caret-down"></i></span>
+      </div>` : ''
+
+      this.bookmarkBar.innerHTML = allChip + bookmarkChip + chips
       this._bookmarkFolders = folders
       
       this.bookmarkBar.querySelectorAll('.bookmark-chip').forEach(chip => {
         chip.addEventListener('click', (e) => {
+          // Caret click opens the dropdown menu
+          if (e.target.closest('.bookmark-chip-drop')) {
+            e.preventDefault()
+            e.stopPropagation()
+            if (chip.id === 'bookmarks-chip') {
+              this._openBookmarkQueryMenu(normals, chip)
+            } else if (chip.classList.contains('bookmark-folder-chip')) {
+              const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
+              if (folder) this.openBookmarkMenu(folder, chip)
+            }
+            return
+          }
+
           e.preventDefault()
           const subfolder = chip.dataset.subfolder
           
@@ -547,6 +576,9 @@ class VideoApp {
             this.query = ''
             const searchInput = document.querySelector('.search')
             if (searchInput) searchInput.value = ''
+          } else if (chip.id === 'bookmarks-chip') {
+            this.toggleFavorites(true)
+            return
           } else {
             const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
             if (!folder) return
@@ -557,12 +589,6 @@ class VideoApp {
           
           this.closeBookmarkMenu()
           this.loadVideos()
-        })
-        chip.addEventListener('contextmenu', (e) => {
-          if (!chip.classList.contains('bookmark-folder-chip')) return
-          e.preventDefault()
-          const folder = this._bookmarkFolders?.[parseInt(chip.dataset.folderIndex, 10)]
-          if (folder) this.openBookmarkMenu(folder, chip)
         })
       })
     } catch (e) {
@@ -620,6 +646,42 @@ class VideoApp {
       this._bookmarkMenu.remove()
       this._bookmarkMenu = null
     }
+  }
+
+  _openBookmarkQueryMenu(bookmarks, chip) {
+    this.closeBookmarkMenu()
+    if (!bookmarks || bookmarks.length === 0) return
+
+    const rect = chip.getBoundingClientRect()
+    const menu = document.createElement('div')
+    menu.className = 'bookmark-folder-menu'
+    menu.style.left = `${Math.max(8, rect.left)}px`
+    menu.style.top = `${rect.bottom + 6}px`
+    menu.innerHTML = bookmarks.map((b) => {
+      const label = this.escapeHTML(b.query || '(unnamed)')
+      return `<button class='bookmark-folder-menu-item' data-query='${this.escapeHTML(b.query)}'>
+        <i class="fa-solid fa-star"></i>
+        <span title='${label}'>${label}</span>
+      </button>`
+    }).join('')
+
+    menu.querySelectorAll('.bookmark-folder-menu-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const query = item.dataset.query
+        this.query = query
+        const searchInput = document.querySelector('.search')
+        if (searchInput) searchInput.value = query
+        this.closeBookmarkMenu()
+        this.loadVideos()
+      })
+    })
+
+    document.body.appendChild(menu)
+    this._bookmarkMenu = menu
+    this._bookmarkMenuCloser = (e) => {
+      if (this._bookmarkMenu && !this._bookmarkMenu.contains(e.target)) this.closeBookmarkMenu()
+    }
+    setTimeout(() => document.addEventListener('mousedown', this._bookmarkMenuCloser), 0)
   }
 
   // --- Load & Render ---
@@ -1244,7 +1306,7 @@ class VideoApp {
     })
     container.querySelectorAll('.panel-filter').forEach(el => el.addEventListener('click', (e) => {
       e.stopPropagation(); const filter = el.getAttribute('data-filter')
-      if (filter) { this._closeViewer(); this.query = filter; document.querySelector('.search').value = filter; this.loadVideos() }
+      if (filter) this.showHyperFilter(el, filter)
     }))
     container.querySelectorAll('.panel-tag-remove').forEach(el => el.addEventListener('click', async (e) => {
       e.stopPropagation()
@@ -1471,6 +1533,96 @@ class VideoApp {
     } catch (e) { infoEl.innerHTML = `<span class='sb-label' style='color:#888'>Could not load trash</span>` }
   }
 
+  // --- Favorites Panel ---
+
+  async toggleFavorites(force) {
+    const panel = document.getElementById('favorites-panel')
+    if (!panel) return
+    const shouldOpen = force === true || (force !== false && panel.classList.contains('hidden'))
+    if (shouldOpen) {
+      const nav = document.querySelector('nav')
+      const navH = nav ? nav.offsetHeight - 1 : 0
+      panel.style.top = navH + 'px'
+      panel.style.height = `calc(100vh - ${navH}px)`
+      await this.renderFavoritesPanel(panel)
+      panel.classList.remove('hidden')
+      this._attachFavoritesOutsideClose()
+    } else {
+      panel.classList.add('hidden')
+      this._detachFavoritesOutsideClose()
+    }
+  }
+
+  async renderFavoritesPanel(panel) {
+    const favorites = await this.api.getFavorites('video')
+    const globals = favorites.filter(f => f.is_global)
+    const normals = favorites.filter(f => !f.is_global)
+
+    const rowHTML = (r, showDelete) => `
+      <div class='fp-row'>
+        <a href="/videos?query=${encodeURIComponent(r.query)}">${r.query || '(unnamed)'}</a>
+        <button class='fp-god-toggle ${r.is_global ? 'on' : ''}' data-id='${r.id}' data-global='${r.is_global ? 'global' : ''}'>
+          <i class="fa-solid ${r.is_global ? 'fa-power-off' : 'fa-eye'}"></i> ${r.is_global ? 'On' : 'God'}
+        </button>
+        ${showDelete ? `<button class='fp-delete' data-id='${r.id}' title='Delete'><i class="fa-solid fa-xmark"></i></button>` : ''}
+      </div>`
+
+    panel.innerHTML = `
+      <div class='fp-header'>
+        <h3><i class="fa-solid fa-bookmark"></i> Bookmarked Filters</h3>
+        <button class='sb-close' title='Close'><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class='fp-body'>
+        <div class='fp-section'>
+          <h4><i class="fa-solid fa-star"></i> Saved Filters</h4>
+          ${normals.length > 0 ? normals.map(r => rowHTML(r, true)).join('') : '<div class="fp-empty">No bookmarked filters yet</div>'}
+        </div>
+        <div class='fp-section-divider'></div>
+        <div class='fp-section'>
+          <h4><i class="fa-solid fa-eye"></i> God Filters</h4>
+          ${globals.length > 0 ? globals.map(r => rowHTML(r, false)).join('') : '<div class="fp-explain">God filters are invisible and apply to all queries. Use the toggle to activate or deactivate them.</div>'}
+        </div>
+      </div>`
+
+    panel.querySelector('.sb-close').addEventListener('click', () => this.toggleFavorites(false))
+    panel.querySelectorAll('.fp-god-toggle').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        const id = parseInt(btn.getAttribute('data-id'))
+        const isGlobal = btn.getAttribute('data-global') === 'global'
+        await this.api.setFavoriteGlobal(id, !isGlobal)
+        await this.renderFavoritesPanel(panel)
+        this.loadVideos()
+      })
+    })
+    panel.querySelectorAll('.fp-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        await this.api.removeFavorite(parseInt(btn.getAttribute('data-id')))
+        await this.renderFavoritesPanel(panel)
+        this.loadVideos()
+      })
+    })
+  }
+
+  _attachFavoritesOutsideClose() {
+    this._detachFavoritesOutsideClose()
+    const panel = document.getElementById('favorites-panel')
+    this._favOutsideHandler = (e) => {
+      if (!panel || panel.classList.contains('hidden')) return
+      if (panel.contains(e.target)) return
+      if (e.target.closest?.('#bookmarked-filters')) return
+      this.toggleFavorites(false)
+    }
+    setTimeout(() => document.addEventListener('mousedown', this._favOutsideHandler), 0)
+  }
+
+  _detachFavoritesOutsideClose() {
+    if (!this._favOutsideHandler) return
+    document.removeEventListener('mousedown', this._favOutsideHandler)
+    this._favOutsideHandler = null
+  }
+
   // --- Utilities ---
   formatFileSize(bytes) {
     if (!bytes || bytes === 0) return '0 B'; const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'], i = Math.floor(Math.log(bytes) / Math.log(k))
@@ -1480,6 +1632,48 @@ class VideoApp {
     if (!seconds || seconds <= 0) return ''; const m = Math.floor(seconds / 60), s = Math.floor(seconds % 60)
     return m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `0:${s.toString().padStart(2, '0')}`
   }
+  showHyperFilter(el, filter) {
+    let includeVal = filter, excludeVal = filter
+    if (filter.includes(':')) {
+      const idx = filter.indexOf(':')
+      excludeVal = '-' + filter.slice(0, idx) + ':' + filter.slice(idx + 1)
+    } else {
+      excludeVal = '-:' + filter
+    }
+
+    const menu = document.createElement('div')
+    menu.className = 'menu-popup'
+    menu.innerHTML = `
+      <div class='menu-item hf-include'><i class="fa-solid fa-filter"></i><span>Filter by <b>${filter}</b></span></div>
+      <hr>
+      <div class='menu-item hf-exclude'><i class="fa-solid fa-filter-circle-xmark"></i><span>Exclude <b>${filter}</b></span></div>`
+
+    const instance = tippy(el, {
+      interactive: true,
+      trigger: 'click',
+      allowHTML: true,
+      placement: 'bottom-start',
+      content: menu,
+      onHidden: () => { instance.destroy() },
+      onShown: () => {
+        const popper = instance.popper
+        popper.querySelector('.hf-include')?.addEventListener('click', () => {
+          instance.hide()
+          this.query = includeVal
+          document.querySelector('.search').value = includeVal
+          this.loadVideos()
+        })
+        popper.querySelector('.hf-exclude')?.addEventListener('click', () => {
+          instance.hide()
+          this.query = excludeVal
+          document.querySelector('.search').value = excludeVal
+          this.loadVideos()
+        })
+      }
+    })
+    if (el._tippy) el._tippy.show()
+  }
+
   formatClock(seconds) {
     if (!seconds || !isFinite(seconds) || seconds < 0) return '0:00'
     const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = Math.floor(seconds % 60)
